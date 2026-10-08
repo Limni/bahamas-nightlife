@@ -79,4 +79,5 @@ check() {
 }
 log "Origin :443 now answers:"
 check nassaunights.limniatis.com
+check nassaunights.com
 check islandgo.limniatis.com

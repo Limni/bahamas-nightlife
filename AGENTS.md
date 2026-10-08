@@ -410,12 +410,13 @@ The full runbook is in **`DEPLOY.md`**. The essentials:
   | `$connection_upgrade` map | defines it in `conf.d/islandgo-upgrade-map.conf` | **reuses** it; never define it twice. `deploy/nassaunights-upgrade-map.conf` is only for servers without it |
 
 - **DNS:** Cloudflare `nassaunights` record, proxied. A first-level subdomain is covered by `*.limniatis.com` Universal SSL.
+- **Second domain:** the vhost's `server_name` also lists `nassaunights.com` and `www.nassaunights.com` (served directly, no redirect). That zone must be proxied by Cloudflare in **Full** (not strict) mode, because the origin reuses Island GO's certificate. The app has no hard-coded domain: auth email links use `window.location.origin`.
 - **Manual deploy:** `./deploy.sh build|deploy|update|logs|stop|status`. It reads `.env`, then `.env.local`.
 
 ## Supabase dashboard settings the app depends on
 
 - **Authentication → Sign In / Providers:** allow new sign-ups (required for member accounts). The provider is email + password.
-- **Authentication → URL Configuration:** Site URL `https://nassaunights.limniatis.com`; redirect URLs include `http://localhost:3000/**`.
+- **Authentication → URL Configuration:** Site URL is the primary domain; redirect URLs must list every domain the site is served on (`https://nassaunights.com/**`, `https://www.nassaunights.com/**`, `https://nassaunights.limniatis.com/**`) plus `http://localhost:3000/**`, or auth emails fall back to the Site URL.
 - **Authentication → Emails → SMTP:** the built-in mailer is heavily rate-limited, so configure custom SMTP before launch or confirmation emails will stall.
 - **Admins:** `insert into public.admins (user_id) select id from auth.users where email = '…';`
 
@@ -448,7 +449,7 @@ There are no tests. A practical loop:
 - **Needs the owner to act:**
   - create the Nassau Nights Supabase project, run `schema.sql` (and optionally `seed_demo.sql`), make yourself an admin, and set the Auth URL config + SMTP as in Nassau Eats;
   - optionally enable `pg_cron` and schedule `activity_housekeeping()`;
-  - register `nassaunights.limniatis.com` with Stadia; DNS + host nginx (`deploy/`); a self-hosted runner and the two repo secrets.
+  - register `nassaunights.limniatis.com`, `nassaunights.com` and `www.nassaunights.com` with Stadia; DNS + host nginx (`deploy/`); a self-hosted runner and the two repo secrets.
 - **Not yet verified end to end:** against a real Supabase project (Realtime delivery of `venue_live`, Storage uploads of flyers), and the Docker image on the server.
 - **Limits of live activity:** counts only people who opted in while the site is open (no background tracking on the web); anyone can call `report_presence` with invented coordinates (rate limits and dwell blunt it, but levels are indicative, not audited); events with their own location have no activity geofence.
 - **Not built:**

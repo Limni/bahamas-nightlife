@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# vm-setup.sh: one-file installer for Nassau Nights on the VM. No git clone or
+# vm-setup.sh: one-file installer for Nassau Nights on the VM (serves
+# nassaunights.limniatis.com, nassaunights.com and www.nassaunights.com). No git clone or
 # GitHub token needed: the nginx vhost is embedded below (a copy of
 # deploy/nassaunights.limniatis.com.conf; keep the two in sync).
 #
@@ -57,6 +58,7 @@ status() {
   log "Vhost: $([[ -L $VHOST_LINK ]] && echo enabled || echo 'not installed')"
   log "Origin :443 answers:"
   printf '      %-30s %s\n' "$DOMAIN" "$(title_of "$DOMAIN")"
+  printf '      %-30s %s\n' "nassaunights.com" "$(title_of nassaunights.com)"
   printf '      %-30s %s\n' "islandgo.limniatis.com" "$(title_of islandgo.limniatis.com)"
 }
 
@@ -139,7 +141,7 @@ upstream nassaunights_app {
 server {
     listen      80;
     listen      [::]:80;
-    server_name nassaunights.limniatis.com;
+    server_name nassaunights.limniatis.com nassaunights.com www.nassaunights.com;
 
     # Allow Let's Encrypt HTTP-01 challenges before TLS is set up.
     location /.well-known/acme-challenge/ {
@@ -181,7 +183,7 @@ server {
 server {
     listen      443 ssl;
     listen      [::]:443 ssl;
-    server_name nassaunights.limniatis.com;
+    server_name nassaunights.limniatis.com nassaunights.com www.nassaunights.com;
 
     include /etc/nginx/snippets/nassaunights-ssl.conf;
 

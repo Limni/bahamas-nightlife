@@ -20,6 +20,14 @@ Add a record named `nassaunights`. Make it either an A/AAAA record pointing at t
 
 `nassaunights.limniatis.com` is a first-level subdomain, so the free `*.limniatis.com` Universal SSL certificate covers it.
 
+### Second domain: `nassaunights.com`
+
+The same app also answers on **`nassaunights.com`** and **`www.nassaunights.com`** (both are in the vhost's `server_name`; neither redirects).
+
+- **DNS:** add `nassaunights.com` to Cloudflare as its own zone (switch the registrar's nameservers to Cloudflare's). In that zone, add `@` and `www`, each either an A record to the VM or a CNAME to `nassaunights.limniatis.com`, all **Proxied (orange)**. Cloudflare's free Universal SSL covers `nassaunights.com` and `www.nassaunights.com` at the edge.
+- **SSL/TLS mode for that zone: Full** (not Full strict). The origin presents Island GO's certificate, which isn't for `nassaunights.com`. Full mode doesn't check the hostname; Full (strict) would fail with a 526. For strict, create a Cloudflare **Origin Certificate** for `nassaunights.com, *.nassaunights.com` and point a separate `:443` server block at it.
+- **On the VM:** copy the new `deploy/vm-setup.sh` over and run `sudo bash vm-setup.sh` again. `--check` then lists what `nassaunights.com` answers too.
+
 ## 2. Host nginx
 
 **No clone needed:** `deploy/vm-setup.sh` is a single self-contained file with the vhost embedded. Get it onto the VM by pasting it into `nano vm-setup.sh` (from GitHub's file view → *Raw*), or with `scp deploy/vm-setup.sh <vm>:`. Then:
@@ -75,8 +83,8 @@ Optional **Variables**:
 
 ## 5. Outside the server
 
-- **Stadia Maps** (map tiles): create a free account at stadiamaps.com and add `nassaunights.limniatis.com` as an allowed domain. Until you do, the map will show no tiles on the live site. It works on localhost without this.
-- **Supabase**: Nassau Nights uses its **own** Supabase project (not Nassau Eats'). Create it, run `supabase/schema.sql` in the SQL Editor, and put its URL and anon key in the repo secrets above. Under Authentication → URL Configuration, set **Site URL** to `https://nassaunights.limniatis.com`. The password login works without it, but auth emails link there.
+- **Stadia Maps** (map tiles): create a free account at stadiamaps.com and add `nassaunights.limniatis.com`, `nassaunights.com` and `www.nassaunights.com` as allowed domains. Until you do, the map will show no tiles on the live site. It works on localhost without this.
+- **Supabase**: Nassau Nights uses its **own** Supabase project (not Nassau Eats'). Create it, run `supabase/schema.sql` in the SQL Editor, and put its URL and anon key in the repo secrets above. Under Authentication → URL Configuration, set **Site URL** to the domain you want auth emails to point at by default (e.g. `https://nassaunights.com`), and add **Redirect URLs** `https://nassaunights.com/**`, `https://www.nassaunights.com/**`, `https://nassaunights.limniatis.com/**` and `http://localhost:3000/**`. The app asks for a redirect back to whichever domain the visitor is on; Supabase only honours ones in that list (otherwise it falls back to the Site URL).
 - **Optional, pg_cron**: Database → Extensions → enable `pg_cron`, then run the `cron.schedule(...)` line at the end of `schema.sql`. Live levels then fade on the minute even when nobody has the site open; without it they fade on the next ping or page view.
 
 ## 6. Deploy
