@@ -30,11 +30,12 @@ const ISLAND = L.latLngBounds([NEW_PROVIDENCE.south, NEW_PROVIDENCE.west], [NEW_
 // A little slack past the island so edge pins can be panned out from under the floating search panel.
 const PAN_LIMIT = ISLAND.pad(0.15);
 
-// Keeps the map on New Providence: the furthest zoom-out is the one where the
-// whole island just fits this screen, recomputed on resize. A fixed minZoom
+// Keeps the map on New Providence: the furthest zoom-out is the whole level at
+// which the island fits this screen, recomputed on resize. A fixed minZoom
 // would crop the island on phones and show mostly ocean on wide monitors.
-// Computed unsnapped (getBoundsZoom floors to whole levels, nearly double the
-// area); Leaflet snaps first and clamps after, so a fractional minZoom holds.
+// It must be a whole number: leaflet.markercluster starts its render pass at
+// getMinZoom() - 1, so a fractional minZoom (e.g. 12.33) skips the top cluster
+// level and every pin that isn't in a cluster silently never appears.
 function LockToIsland() {
   const map = useMap();
   useEffect(() => {
@@ -44,7 +45,7 @@ function LockToIsland() {
       const z = map.getZoom();
       const nw = map.project(ISLAND.getNorthWest(), z);
       const se = map.project(ISLAND.getSouthEast(), z);
-      map.setMinZoom(map.getScaleZoom(Math.min(size.x / (se.x - nw.x), size.y / (se.y - nw.y)), z));
+      map.setMinZoom(Math.floor(map.getScaleZoom(Math.min(size.x / (se.x - nw.x), size.y / (se.y - nw.y)), z)));
     };
     fit();
     map.on('resize', fit);
