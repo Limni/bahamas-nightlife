@@ -11,7 +11,7 @@ Guidance for AI coding agents (and humans) working in this repository. Read this
 
 Everything else is Nassau Eats: directory, map, venue pages with drinks menus/photos/reviews, member accounts, community suggestions and the phone-friendly admin console.
 
-It is a static React SPA with **no custom backend**. All data, auth and file storage go through **its own Supabase project** (not Nassau Eats'), protected by Postgres row-level security (RLS). It is deployed as an nginx Docker container on the same VM as Island GO (port 5050) and Nassau Eats (5060), on port **5070**.
+It is a static React SPA with **no custom backend**. All data, auth and file storage go through **its own Supabase project** (not Nassau Eats'), protected by Postgres row-level security (RLS). It is deployed as an nginx Docker container on the same VM as Island GO (port 5050) and Nassau Eats (5060), on port **5110**.
 
 - Repo: `https://github.com/Limni/bahamas-nightlife` (branch `main`)
 - Supabase project: a new one per `README.md` setup (fill `.env.local`; none is committed).
@@ -369,7 +369,7 @@ All `VITE_*` values are **inlined at build time** and are public (they ship in t
 | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | `.env` locally; GitHub **secrets** in CI | required |
 | `VITE_MAP_TILE_URL`, `VITE_MAP_ATTRIBUTION` | optional; GitHub **variables** in CI | empty falls back to Stadia defaults |
 | `GOOGLE_MAPS_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | `.env` / `.env.local` only | **secret**, used only by `scripts/seed-google.ts`; never prefix with `VITE_` |
-| `PORT` | GitHub variable / `.env` for `deploy.sh` | host port, default `5070` |
+| `PORT` | GitHub variable / `.env` for `deploy.sh` | host port, default `5110` |
 
 `.env*` is git-ignored (except `.env.example`). **Never commit real secrets.** The service-role key bypasses RLS and must never reach the browser.
 
@@ -394,16 +394,16 @@ It does not import photos. It requires the `google_place_id` column, so re-run `
 ## Deployment
 
 The full runbook is in **`DEPLOY.md`**. The essentials:
-- **CI** (`.github/workflows/deploy.yml`): a push to `main` builds the image on `ubuntu-latest` and pushes it to `ghcr.io/limni/bahamas-nightlife` (`:latest` and `:<sha>`). Then a **self-hosted runner registered to this repo** (separate from Island GO's runner; runners are per repo) pulls the image and runs container `nassaunights` on **`127.0.0.1:5070`**. Concurrency group: `deploy-nassaunights`.
+- **CI** (`.github/workflows/deploy.yml`): a push to `main` builds the image on `ubuntu-latest` and pushes it to `ghcr.io/limni/bahamas-nightlife` (`:latest` and `:<sha>`). Then a **self-hosted runner registered to this repo** (separate from Island GO's runner; runners are per repo) pulls the image and runs container `nassaunights` on **`127.0.0.1:5110`**. Concurrency group: `deploy-nassaunights`.
 - **Container:** `Dockerfile` is a two-stage build (`node:22-alpine` → `nginx:1.27-alpine`). `npm ci` falls back to `npm install` because the lockfile is generated on Windows and lacks Linux optional binaries. `nginx.conf` provides the SPA fallback to `index.html`, immutable `/assets/` caching, and `no-cache` for `index.html` and `sw.js`.
-- **Host nginx:** `deploy/nassaunights.limniatis.com.conf` defines upstream `nassaunights_app` → `127.0.0.1:5070`, with `:80` and **`:443`** server blocks. The `:443` block includes `/etc/nginx/snippets/nassaunights-ssl.conf`.
+- **Host nginx:** `deploy/nassaunights.limniatis.com.conf` defines upstream `nassaunights_app` → `127.0.0.1:5110`, with `:80` and **`:443`** server blocks. The `:443` block includes `/etc/nginx/snippets/nassaunights-ssl.conf`.
   - Cloudflare runs in **Full** mode. Without a `:443` block, nginx would answer this host with **Island GO** (its default TLS server).
   - `sudo ./deploy/enable-https.sh` copies Island GO's certificate lines into that snippet, installs and enables the vhost, runs `nginx -t`, and **rolls back on failure**.
 - **Coexisting with Island GO on the same VM:**
 
   | | Island GO | Nassau Nights |
   | --- | --- | --- |
-  | Port | 5050 | 5070 |
+  | Port | 5050 | 5110 |
   | Upstream | `islandgo_app` | `nassaunights_app` |
   | Logs | `islandgo.*` | `nassaunights.*` |
   | `$connection_upgrade` map | defines it in `conf.d/islandgo-upgrade-map.conf` | **reuses** it; never define it twice. `deploy/nassaunights-upgrade-map.conf` is only for servers without it |

@@ -59,7 +59,7 @@ jobs:
       packages: read
     env:
       NAME: nassaunights
-      PORT: ${{ vars.PORT || '5070' }}
+      PORT: ${{ vars.PORT || '5110' }}
       # Job-private Docker config, so the short-lived GHCR token never lands in
       # the runner user's ~/.docker/config.json.
       DOCKER_CONFIG: ${{ github.workspace }}/.docker-config

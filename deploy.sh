@@ -14,7 +14,7 @@
 # Config (override via env or the env file):
 #   IMAGE   image name/tag        (default: nassaunights:latest)
 #   NAME    container name        (default: nassaunights)
-#   PORT    host port -> :80      (default: 5070 — Island GO uses 5050)
+#   PORT    host port -> :80      (default: 5110 — Island GO uses 5050)
 #   ENV_FILE  env file to read    (default: .env, falling back to .env.local)
 #
 set -euo pipefail
@@ -41,7 +41,7 @@ fi
 
 IMAGE="${IMAGE:-nassaunights:latest}"
 NAME="${NAME:-nassaunights}"
-PORT="${PORT:-5070}"
+PORT="${PORT:-5110}"
 
 command -v docker >/dev/null 2>&1 || die "docker is not installed or not on PATH."
 

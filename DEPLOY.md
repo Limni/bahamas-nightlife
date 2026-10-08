@@ -7,7 +7,7 @@ Same setup as Island GO (`islandgo.limniatis.com`) and Nassau Eats (`nassaueats.
 | Repo | `Limni/bahamas-exp` | `Limni/bahamas-nassaueats` | `Limni/bahamas-nightlife` |
 | Image | `ghcr.io/limni/bahamas-exp` | `ghcr.io/limni/bahamas-nassaueats` | `ghcr.io/limni/bahamas-nightlife` |
 | Container | `island-explorer` | `nassaueats` | `nassaunights` |
-| Host port | `5050` | `5060` | **`5070`** (bound to 127.0.0.1) |
+| Host port | `5050` | `5060` | **`5110`** (bound to 127.0.0.1; 5070 is taken by another app on the VM) |
 | nginx vhost | `islandgo.limniatis.com.conf` (+ `admin-islandgo…`) | `nassaueats.limniatis.com.conf` | `nassaunights.limniatis.com.conf` |
 | nginx upstream | `islandgo_app` | `nassaueats_app` | `nassaunights_app` |
 | `$connection_upgrade` map | `conf.d/islandgo-upgrade-map.conf` | reuses Island GO's | **reuses Island GO's** — don't define it again |
@@ -59,7 +59,7 @@ Go to **Settings → Secrets and variables → Actions**.
 | `VITE_SUPABASE_ANON_KEY` | Supabase anon key |
 
 Optional **Variables**:
-- `PORT`: overrides the default `5070`. If you change it, change the vhost upstream too.
+- `PORT`: overrides the default `5110`. If you change it, change the vhost upstream too.
 - `VITE_MAP_TILE_URL` and `VITE_MAP_ATTRIBUTION`: switch the map tile provider.
 
 ## 5. Outside the server
@@ -77,7 +77,7 @@ Push to `main`, or go to **Actions → Build & Deploy → Run workflow**.
 ```bash
 git clone https://github.com/Limni/bahamas-nightlife.git && cd bahamas-nightlife
 cp .env.example .env    # fill in VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY
-./deploy.sh deploy      # build + run on 127.0.0.1:5070
+./deploy.sh deploy      # build + run on 127.0.0.1:5110
 ./deploy.sh update      # later: git pull + rebuild + restart
 ```
 
@@ -86,8 +86,8 @@ Builds use a lot of memory on a small VM. That's why CI does the build, and you 
 ## Checks after the first deploy
 
 ```bash
-docker ps --format 'table {{.Names}}\t{{.Ports}}'     # island-explorer :5050, nassaunights 127.0.0.1:5070
-curl -sI http://127.0.0.1:5070/ | head -1             # 200 from the container
+docker ps --format 'table {{.Names}}\t{{.Ports}}'     # island-explorer :5050, nassaunights 127.0.0.1:5110
+curl -sI http://127.0.0.1:5110/ | head -1             # 200 from the container
 curl -sI -H 'Host: nassaunights.limniatis.com' http://127.0.0.1/ | head -1   # 200 via host nginx
 curl -sI -H 'Host: islandgo.limniatis.com'  http://127.0.0.1/ | head -1    # Island GO still answers
 # :443 is what Cloudflare actually uses. Expect "Nassau Nights", not "Nassau GO".

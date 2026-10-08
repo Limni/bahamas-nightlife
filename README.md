@@ -60,4 +60,4 @@ The admin picks the public look in **Admin → Theme**: **Neon nights** (default
 
 ## Deploy
 
-Production is **https://nassaunights.limniatis.com**, a Docker container on port `5070` next to Island GO (`5050`) and Nassau Eats (`5060`), behind the host's nginx. Pushing to `main` deploys through GitHub Actions. See **[DEPLOY.md](DEPLOY.md)**.
+Production is **https://nassaunights.limniatis.com**, a Docker container on port `5110` next to Island GO (`5050`) and Nassau Eats (`5060`), behind the host's nginx. Pushing to `main` deploys through GitHub Actions. See **[DEPLOY.md](DEPLOY.md)**.
