@@ -380,7 +380,7 @@ insert into public.tags (kind, label, sort) values
   ('category', 'Sports Bar', 7), ('category', 'Pub', 8), ('category', 'Wine Bar', 9),
   ('category', 'Rum Bar', 10), ('category', 'Karaoke', 11), ('category', 'Casino', 12),
   ('category', 'Hookah Lounge', 13), ('category', 'Dive Bar', 14), ('category', 'Fish Fry & Bar', 15),
-  ('category', 'Hotel Bar', 16), ('category', 'Bar & Grill', 17),
+  ('category', 'Hotel Bar', 16), ('category', 'Bar & Grill', 17), ('category', 'Local Bar', 18),
   ('vibe', 'Dancing', 1), ('vibe', 'DJ Sets', 2), ('vibe', 'Live Band', 3),
   ('vibe', 'Happy Hour', 4), ('vibe', 'Late Night', 5), ('vibe', 'Waterfront', 6),
   ('vibe', 'Rooftop Views', 7), ('vibe', 'Dress to Impress', 8), ('vibe', 'Laid-back', 9),

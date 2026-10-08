@@ -52,6 +52,7 @@ const CATEGORY_STYLES: Record<string, PinStyle> = {
   'Fish Fry & Bar': { color: '#0284c7', glyph: G.fish },
   'Hotel Bar': { color: '#0ea5e9', glyph: G.bell },
   'Bar & Grill': { color: '#ef4444', glyph: G.flame },
+  'Local Bar': { color: '#14b8a6', glyph: G.beer },
 };
 
 const FALLBACK_COLORS = ['#d946ef', '#06b6d4', '#8b5cf6', '#f43f5e', '#f97316', '#6366f1', '#22c55e', '#eab308'];

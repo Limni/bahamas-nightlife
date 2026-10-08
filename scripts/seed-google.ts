@@ -9,6 +9,7 @@
 //   npm run seed:google -- --dry-run --out spots.json
 //   npm run seed:google                              # insert drafts
 //   npm run seed:google -- --min-reviews 10          # skip barely-reviewed spots
+//   npm run seed:google -- --cache places.json       # reuse one sweep across runs
 //
 // Env (.env.local or .env; never commit these, never prefix them with VITE_):
 //   GOOGLE_MAPS_API_KEY        key with "Places API (New)" enabled
@@ -21,7 +22,7 @@
 // Run supabase/schema.sql first so the google_place_id column exists.
 // =============================================================================
 
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { createClient } from '@supabase/supabase-js';
 import type { WeeklyHours } from '../src/lib/hours.ts';
@@ -34,6 +35,9 @@ const { values: args } = parseArgs({
     query: { type: 'string', multiple: true },
     out: { type: 'string' },
     'max-depth': { type: 'string', default: '4' }, // 4 → cells down to ≈ 550 m
+    // Save the raw Google results here, or reuse them if the file exists, so
+    // re-running after a mapping tweak costs no API requests.
+    cache: { type: 'string' },
   },
 });
 
@@ -176,10 +180,20 @@ const NOT_NIGHTLIFE = new Set([
   'liquor_store', 'marina', 'shopping_mall', 'store', 'catering_service', 'coffee_shop', 'bakery',
 ]);
 
+// Google files plenty of package stores and restaurants under "bar". Their
+// names give them away; a restaurant that also says bar/lounge/club stays.
+const LIQUOR_STORE = /\b(liquors?|liqour|liquorstore|spirits|wholesale)\b/i;
+const NIGHT_WORD = /\b(bar|lounge|club|pub|tavern|saloon|disco)\b/i;
+const FOOD_WORD = /\b(restaurant|caf[eé]|grill|kitchen|diner|eatery|bistro|pizza|bakery|take ?away)\b/i;
+
 function keep(p: Place): string | null {
   if (p.businessStatus && p.businessStatus !== 'OPERATIONAL') return p.businessStatus.toLowerCase();
   if (!p.displayName?.text || !p.location) return 'missing name/location';
   if (p.primaryType && NOT_NIGHTLIFE.has(p.primaryType)) return p.primaryType;
+  const name = p.displayName.text;
+  // "Nestor's Wholesale Bar and Lounge" is a hangout; "Quick Fix Liquors" is a shop.
+  if (LIQUOR_STORE.test(name) && !/\blounge\b/i.test(name)) return 'liquor store (by name)';
+  if (FOOD_WORD.test(name) && !NIGHT_WORD.test(name)) return 'restaurant (by name)';
   if (!(p.primaryType && NIGHT_TYPES.has(p.primaryType)) && !p.types?.some((t) => NIGHT_TYPES.has(t))) return 'not a bar or club';
   if ((p.userRatingCount ?? 0) < MIN_REVIEWS) return 'too few reviews';
   return null;
@@ -210,15 +224,21 @@ const CATEGORY_BY_TYPE: Record<string, string> = {
 
 // Google has no beach-bar, rum-bar or rooftop types, so lean on the name.
 const CATEGORY_BY_NAME: [RegExp, string][] = [
-  [/(beach|sand|tiki|shack)/i, 'Beach Bar'],
-  [/rum/i, 'Rum Bar'],
-  [/(rooftop|sky ?bar|skyline)/i, 'Rooftop Bar'],
-  [/lounge/i, 'Lounge'],
-  [/(club|disco)/i, 'Nightclub'],
-  [/fish fry/i, 'Fish Fry & Bar'],
-  [/karaoke/i, 'Karaoke'],
-  [/(jazz|live music)/i, 'Live Music'],
-  [/sports/i, 'Sports Bar'],
+  [/\b(beach|sand|tiki|shack)\b/i, 'Beach Bar'],
+  [/\brum\b/i, 'Rum Bar'],
+  [/\b(rooftop|sky ?bar|skyline)\b/i, 'Rooftop Bar'],
+  [/\blounge\b/i, 'Lounge'],
+  [/\b(club|disco)\b/i, 'Nightclub'],
+  [/\bfish fry\b/i, 'Fish Fry & Bar'],
+  [/\bkaraoke\b/i, 'Karaoke'],
+  [/\b(jazz|live music)\b/i, 'Live Music'],
+  [/\bsports?\b/i, 'Sports Bar'],
+  [/\bcocktails?\b/i, 'Cocktail Bar'],
+  [/\b(wine|vino)\b/i, 'Wine Bar'],
+  [/\b(pub|tavern|taproom|brew)/i, 'Pub'],
+  [/\bhookah\b/i, 'Hookah Lounge'],
+  [/\bcasino\b/i, 'Casino'],
+  [/\bgrill\b/i, 'Bar & Grill'],
 ];
 
 // Rough centres for the starter area tags. A spot gets the nearest one within
@@ -350,8 +370,8 @@ function toRow(p: Place, tags: Record<'category' | 'vibe' | 'area', Set<string>>
     const label = t && CATEGORY_BY_TYPE[t];
     if (label) categories.add(label);
   }
-  // A plain "bar" with no better clue: still a bar.
-  if (categories.size === 0 && (p.primaryType === 'bar' || p.types?.includes('bar'))) categories.add('Cocktail Bar');
+  // A plain "bar" with no better clue is a neighbourhood bar, not a cocktail bar.
+  if (categories.size === 0 && (p.primaryType === 'bar' || p.types?.includes('bar'))) categories.add('Local Bar');
 
   // Only the attributes that actually tell spots apart — "good for groups"
   // is true for nearly everything on Google.
@@ -400,7 +420,10 @@ function findManualMatch(row: Row, existing: Existing[]): Existing | undefined {
   return existing.find((e) => {
     if (e.google_place_id) return false;
     const en = normalize(e.name);
-    const sameName = en === n || (Math.min(en.length, n.length) >= 5 && (en.includes(n) || n.includes(en)));
+    const near = e.lat != null && e.lng != null && distanceM(row.lat, row.lng, e.lat, e.lng) < 150;
+    // Short names ("Anuk" vs Google's "Anuk West") only link when the pins are close.
+    const prefix = Math.min(en.length, n.length) >= 3 && (en.startsWith(n) || n.startsWith(en));
+    const sameName = en === n || (Math.min(en.length, n.length) >= 5 && (en.includes(n) || n.includes(en))) || (prefix && near);
     if (!sameName) return false;
     return e.lat == null || e.lng == null ? en === n : distanceM(row.lat, row.lng, e.lat, e.lng) < 250;
   });
@@ -427,10 +450,19 @@ async function main() {
   for (const t of tagRows as { kind: keyof typeof tags; label: string }[]) tags[t.kind]?.add(t.label);
 
   const found = new Map<string, Place>();
-  for (const q of QUERIES) {
-    console.log(`Searching "${q}" across New Providence…`);
-    for (const cell of splitBox(NEW_PROVIDENCE, START_CELL_DEG)) await sweep(q, cell, START_CELL_DEG, 1, found);
-    console.log(`  ${found.size} unique places so far (${requestCount} API requests)`);
+  if (args.cache && existsSync(args.cache)) {
+    for (const p of JSON.parse(readFileSync(args.cache, 'utf8')) as Place[]) found.set(p.id, p);
+    console.log(`Loaded ${found.size} places from ${args.cache} (no API requests).`);
+  } else {
+    for (const q of QUERIES) {
+      console.log(`Searching "${q}" across New Providence…`);
+      for (const cell of splitBox(NEW_PROVIDENCE, START_CELL_DEG)) await sweep(q, cell, START_CELL_DEG, 1, found);
+      console.log(`  ${found.size} unique places so far (${requestCount} API requests)`);
+    }
+    if (args.cache) {
+      writeFileSync(args.cache, JSON.stringify([...found.values()]));
+      console.log(`  saved raw results to ${args.cache}`);
+    }
   }
 
   const skipped = new Map<string, number>();
