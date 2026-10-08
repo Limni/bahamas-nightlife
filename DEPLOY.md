@@ -22,6 +22,17 @@ Add a record named `nassaunights`. Make it either an A/AAAA record pointing at t
 
 ## 2. Host nginx
 
+**No clone needed:** `deploy/vm-setup.sh` is a single self-contained file with the vhost embedded. Get it onto the VM by pasting it into `nano vm-setup.sh` (from GitHub's file view → *Raw*), or with `scp deploy/vm-setup.sh <vm>:`. Then:
+
+```bash
+sudo bash vm-setup.sh            # install/refresh the vhost (:80 + :443), nginx -t, reload, rollback on failure
+sudo bash vm-setup.sh --check    # container, port, vhost and what :443 answers for each host
+```
+
+It checks port 5110 is free (or already the `nassaunights` container's), installs the `$connection_upgrade` map only if Island GO hasn't, reuses Island GO's certificate lines, and drops `[::]` listens on hosts without IPv6. Re-running it is safe. Keep the embedded vhost in sync with `deploy/nassaunights.limniatis.com.conf` when you change either.
+
+Or, from a clone of the repo:
+
 ```bash
 # Check the upgrade map already exists (from Island GO). Expect one hit in conf.d/islandgo-upgrade-map.conf.
 grep -rn 'connection_upgrade' /etc/nginx/
@@ -73,6 +84,14 @@ Optional **Variables**:
 Push to `main`, or go to **Actions → Build & Deploy → Run workflow**.
 
 ## Manual deploy (no CI)
+
+Without a clone, pull the image CI built (needs a GitHub token with `read:packages`, because the package is private):
+
+```bash
+GHCR_USER=<github-user> GHCR_TOKEN=<token> sudo -E bash vm-setup.sh --run   # pull + run on 127.0.0.1:5110
+```
+
+Or build on the VM from a clone:
 
 ```bash
 git clone https://github.com/Limni/bahamas-nightlife.git && cd bahamas-nightlife

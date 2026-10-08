@@ -121,7 +121,7 @@ supabase/
                            of crowd history + a live crowd
 scripts/
   seed-google.ts           Google Places importer (Node, service-role key)
-deploy/                    host nginx vhost + HTTPS installer (see Deployment)
+deploy/                    host nginx vhost, HTTPS installer, vm-setup.sh (no-clone installer)
 Dockerfile, nginx.conf     container build + in-container SPA server
 deploy.sh                  manual build/run script (same shape as Island GO's)
 .github/workflows/deploy.yml  CI: build on GitHub -> GHCR -> self-hosted runner runs it
@@ -399,6 +399,7 @@ The full runbook is in **`DEPLOY.md`**. The essentials:
 - **Host nginx:** `deploy/nassaunights.limniatis.com.conf` defines upstream `nassaunights_app` → `127.0.0.1:5110`, with `:80` and **`:443`** server blocks. The `:443` block includes `/etc/nginx/snippets/nassaunights-ssl.conf`.
   - Cloudflare runs in **Full** mode. Without a `:443` block, nginx would answer this host with **Island GO** (its default TLS server).
   - `sudo ./deploy/enable-https.sh` copies Island GO's certificate lines into that snippet, installs and enables the vhost, runs `nginx -t`, and **rolls back on failure**.
+  - `deploy/vm-setup.sh` does the same **without a clone**: one file with the vhost embedded (keep it in sync with `deploy/nassaunights.limniatis.com.conf`), plus a port check, the upgrade map only if missing, IPv4-only fallback, `--check`, and `--run` (pull + run the GHCR image).
 - **Coexisting with Island GO on the same VM:**
 
   | | Island GO | Nassau Nights |
