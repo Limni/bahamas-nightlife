@@ -6,6 +6,7 @@ import { useDirectory } from '@/lib/directory';
 import { SUBMISSION_KIND_LABELS, type SubmissionKind, type SubmissionStatus } from '@/lib/types';
 import { Spinner, Stars } from '@/components/ui';
 import { Button, Field, inputClass, useFeedback } from './ui';
+import { MemberVenues } from './VenueManagers';
 
 /** One row of `admin_list_users()`: auth.users joined with profile and counts. */
 interface Member {
@@ -17,6 +18,8 @@ interface Member {
   email_confirmed_at: string | null;
   banned_until: string | null; // only set while the suspension is in force
   invited_at: string | null;
+  /** Venues they can manage from /manage. */
+  venue_count: number;
   is_admin: boolean;
   review_count: number;
   hidden_review_count: number;
@@ -24,7 +27,7 @@ interface Member {
   total_count: number;
 }
 
-type Filter = 'all' | 'admins' | 'invited' | 'suspended' | 'unconfirmed';
+type Filter = 'all' | 'admins' | 'managers' | 'invited' | 'suspended' | 'unconfirmed';
 const PAGE = 50;
 
 const SUSPEND_FOR: [string, number | null][] = [
@@ -196,6 +199,7 @@ export default function UsersAdmin({ meId }: { meId: string }) {
             [
               ['all', 'All'],
               ['admins', 'Admins'],
+              ['managers', 'Managers'],
               ['suspended', 'Suspended'],
               ['invited', 'Invited'],
               ['unconfirmed', 'Unconfirmed'],
@@ -268,6 +272,7 @@ function MemberRow({ m, me, open, onToggle, onChanged }: { m: Member; me: boolea
             <span className="font-extrabold text-slate-900 truncate">{m.display_name}</span>
             {me && <Badge tone="slate">You</Badge>}
             {m.is_admin && <Badge tone="brand">Admin</Badge>}
+            {m.venue_count > 0 && <Badge tone="slate">Manager · {m.venue_count}</Badge>}
             {m.banned_until && <Badge tone="rose">{suspendedLabel(m.banned_until)}</Badge>}
             {!m.email_confirmed_at && <Badge tone="amber">{m.invited_at ? 'Invited' : 'Unconfirmed'}</Badge>}
           </span>
@@ -561,6 +566,14 @@ function MemberDetail({ m, me, onChanged }: { m: Member; me: boolean; onChanged:
           )}
         </div>
       )}
+
+      <div className="space-y-2">
+        <p className="text-xs font-extrabold uppercase tracking-wider text-slate-500">Venues they manage</p>
+        {m.banned_until ? (
+          <p className="text-sm font-semibold text-slate-500">Suspended members can’t manage venues until the suspension ends.</p>
+        ) : null}
+        <MemberVenues userId={m.id} onChanged={onChanged} />
+      </div>
 
       <div className="space-y-2">
         <p className="text-xs font-extrabold uppercase tracking-wider text-slate-500">

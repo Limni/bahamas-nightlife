@@ -7,6 +7,7 @@ import type { NightEvent, Venue } from '@/lib/types';
 import { useNow } from '@/lib/useNow';
 import { Spinner } from '@/components/ui';
 import { inputClass } from './ui';
+import { useConsole } from './console';
 
 type View = 'upcoming' | 'live' | 'drafts' | 'past';
 
@@ -15,18 +16,17 @@ type Row = NightEvent & { venues: Pick<Venue, 'id' | 'name' | 'lat' | 'lng'> | n
 /** All events, drafts and past ones included. */
 export default function EventsList() {
   const now = useNow();
+  const { base, venueIds } = useConsole();
   const [rows, setRows] = useState<Row[] | null>(null);
   const [view, setView] = useState<View>('upcoming');
   const [query, setQuery] = useState('');
 
   useEffect(() => {
-    supabase
-      .from('events')
-      .select('*, venues(id, name, lat, lng)')
-      .order('start_date', { ascending: false })
-      .limit(500)
-      .then(({ data }) => setRows((data as Row[]) ?? []));
-  }, []);
+    let q = supabase.from('events').select('*, venues(id, name, lat, lng)').order('start_date', { ascending: false }).limit(500);
+    // A manager sees the events at their venues (RLS would also show everyone's published ones).
+    if (venueIds) q = q.in('venue_id', venueIds);
+    q.then(({ data }) => setRows((data as Row[]) ?? []));
+  }, [venueIds]);
 
   const shown = useMemo(() => {
     if (!rows) return [];
@@ -57,7 +57,7 @@ export default function EventsList() {
           <p className="text-sm font-semibold text-slate-500">Highlighted nights. Live ones pulse on the public map.</p>
         </div>
         <Link
-          to="/admin/events/new"
+          to={`${base}/events/new`}
           className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-extrabold hover:bg-brand-700 shadow-sm"
         >
           <Plus className="w-4 h-4" /> New event
@@ -105,7 +105,7 @@ export default function EventsList() {
             const pinned = eventPosition(e, (e.venues ?? undefined) as Venue | undefined) !== null;
             return (
               <li key={e.id}>
-                <Link to={`/admin/events/${e.id}`} className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-200 hover:border-brand-300 hover:shadow-sm transition-all">
+                <Link to={`${base}/events/${e.id}`} className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-200 hover:border-brand-300 hover:shadow-sm transition-all">
                   <div className="w-16 h-16 rounded-xl overflow-hidden bg-gradient-to-br from-brand-500 to-glow-500 shrink-0">
                     {e.image_url && <img src={e.image_url} alt="" className="w-full h-full object-cover" loading="lazy" />}
                   </div>

@@ -1179,18 +1179,18 @@ end $$;
 -- =============================================================================
 
 -- Dropped first: create or replace can't change a function's result columns
--- (invited_at was added after the first version).
+-- (invited_at, then venue_count, were added after the first version).
 drop function if exists public.admin_list_users(text, text, int, int);
 create function public.admin_list_users(
   p_search text default null,
-  p_filter text default 'all',      -- all | admins | suspended | unconfirmed | invited
+  p_filter text default 'all',      -- all | admins | managers | suspended | unconfirmed | invited
   p_limit  int  default 50,
   p_offset int  default 0
 )
 returns table (
   id uuid, email text, display_name text, created_at timestamptz,
   last_sign_in_at timestamptz, email_confirmed_at timestamptz, banned_until timestamptz,
-  invited_at timestamptz, is_admin boolean, review_count int, hidden_review_count int, submission_count int,
+  invited_at timestamptz, is_admin boolean, venue_count int, review_count int, hidden_review_count int, submission_count int,
   total_count bigint
 )
 language plpgsql
@@ -1215,6 +1215,7 @@ begin
          case when u.banned_until > now() then u.banned_until end,
          u.invited_at,
          a.user_id is not null,
+         (select count(*)::int from public.venue_managers vm where vm.user_id = u.id),
          (select count(*)::int from public.reviews r where r.user_id = u.id),
          (select count(*)::int from public.reviews r where r.user_id = u.id and r.is_hidden),
          (select count(*)::int from public.submissions s where s.user_id = u.id),
@@ -1228,6 +1229,7 @@ begin
          or u.id::text = q)
     and case coalesce(p_filter, 'all')
           when 'admins' then a.user_id is not null
+          when 'managers' then exists (select 1 from public.venue_managers vm where vm.user_id = u.id)
           when 'invited' then u.invited_at is not null and u.email_confirmed_at is null
           when 'suspended' then coalesce(u.banned_until > now(), false)
           when 'unconfirmed' then u.email_confirmed_at is null
@@ -1367,3 +1369,224 @@ grant execute on function public.admin_set_admin(uuid, boolean) to authenticated
 grant execute on function public.admin_suspend_user(uuid, timestamptz) to authenticated;
 grant execute on function public.admin_confirm_user(uuid) to authenticated;
 grant execute on function public.admin_delete_user(uuid) to authenticated;
+
+-- =============================================================================
+-- Venue managers (/manage)
+--
+-- An admin assigns members to venues (a member can manage several, a venue
+-- can have several managers). A manager can edit their venues' listing,
+-- photos, drinks/food menus and events, but not: publishing, featuring, the
+-- URL slug, the activity radius, deleting the venue, reviews or likes.
+--
+-- Write access is extra policies OR-ed with the admin ones; the admin-only
+-- columns are held in place by guard triggers (so a hand-crafted request
+-- can't change them either). The guards only act on API callers
+-- (anon/authenticated): security-definer functions, the service role and the
+-- SQL editor pass through.
+-- =============================================================================
+
+create table if not exists public.venue_managers (
+  venue_id   uuid not null references public.venues (id) on delete cascade,
+  user_id    uuid not null references auth.users (id) on delete cascade,
+  created_by uuid default auth.uid() references auth.users (id) on delete set null,
+  created_at timestamptz not null default now(),
+  primary key (venue_id, user_id)
+);
+
+create index if not exists venue_managers_user_idx on public.venue_managers (user_id);
+
+alter table public.venue_managers enable row level security;
+
+drop policy if exists "Managers see their own assignments" on public.venue_managers;
+create policy "Managers see their own assignments" on public.venue_managers
+  for select using (user_id = auth.uid() or public.is_admin());
+
+drop policy if exists "Admins assign managers" on public.venue_managers;
+create policy "Admins assign managers" on public.venue_managers
+  for all using (public.is_admin()) with check (public.is_admin());
+
+-- A suspended member loses manager rights along with everything else.
+create or replace function public.is_venue_manager(p_venue uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select auth.uid() is not null
+     and p_venue is not null
+     and exists (select 1 from public.venue_managers m where m.venue_id = p_venue and m.user_id = auth.uid())
+     and not public.is_suspended();
+$$;
+
+-- True for a request from the app (not a security-definer function, the
+-- service role or the SQL editor) by someone who isn't an admin.
+create or replace function public.is_restricted_writer()
+returns boolean
+language sql
+stable
+as $$
+  select current_user in ('anon', 'authenticated') and not public.is_admin();
+$$;
+
+-- Venues ----------------------------------------------------------------------
+drop policy if exists "Managers see their venues" on public.venues;
+create policy "Managers see their venues" on public.venues
+  for select using (public.is_venue_manager(id));
+
+drop policy if exists "Managers edit their venues" on public.venues;
+create policy "Managers edit their venues" on public.venues
+  for update using (public.is_venue_manager(id)) with check (public.is_venue_manager(id));
+
+create or replace function public.venues_manager_guard()
+returns trigger
+language plpgsql
+as $$
+begin
+  if public.is_restricted_writer() then
+    new.is_published    := old.is_published;
+    new.is_featured     := old.is_featured;
+    new.featured_until  := old.featured_until;
+    new.slug            := old.slug;
+    new.radius_m        := old.radius_m;
+    new.google_place_id := old.google_place_id;
+  end if;
+  return new;
+end;
+$$;
+
+-- Named to sort before venues_slug, so the slug is restored before that runs.
+drop trigger if exists venues_manager_guard on public.venues;
+create trigger venues_manager_guard
+  before update on public.venues
+  for each row execute function public.venues_manager_guard();
+
+-- Photos and menus ---------------------------------------------------------------
+drop policy if exists "Managers see their venue photos" on public.venue_photos;
+create policy "Managers see their venue photos" on public.venue_photos
+  for select using (public.is_venue_manager(venue_id));
+
+drop policy if exists "Managers manage their venue photos" on public.venue_photos;
+create policy "Managers manage their venue photos" on public.venue_photos
+  for all using (public.is_venue_manager(venue_id)) with check (public.is_venue_manager(venue_id));
+
+drop policy if exists "Managers see their menu items" on public.menu_items;
+create policy "Managers see their menu items" on public.menu_items
+  for select using (public.is_venue_manager(venue_id));
+
+drop policy if exists "Managers manage their menu items" on public.menu_items;
+create policy "Managers manage their menu items" on public.menu_items
+  for all using (public.is_venue_manager(venue_id)) with check (public.is_venue_manager(venue_id));
+
+-- Likes are the members': nobody edits like_count through the API (the likes
+-- trigger is security definer, so it passes).
+create or replace function public.menu_items_like_guard()
+returns trigger
+language plpgsql
+as $$
+begin
+  if current_user in ('anon', 'authenticated') then
+    if tg_op = 'INSERT' then
+      new.like_count := 0;
+    else
+      new.like_count := old.like_count;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists menu_items_like_guard on public.menu_items;
+create trigger menu_items_like_guard
+  before insert or update on public.menu_items
+  for each row execute function public.menu_items_like_guard();
+
+-- Events at their venues ---------------------------------------------------------
+drop policy if exists "Managers see their venue events" on public.events;
+create policy "Managers see their venue events" on public.events
+  for select using (public.is_venue_manager(venue_id));
+
+drop policy if exists "Managers add events at their venues" on public.events;
+create policy "Managers add events at their venues" on public.events
+  for insert with check (public.is_venue_manager(venue_id));
+
+drop policy if exists "Managers edit events at their venues" on public.events;
+create policy "Managers edit events at their venues" on public.events
+  for update using (public.is_venue_manager(venue_id)) with check (public.is_venue_manager(venue_id));
+
+drop policy if exists "Managers delete events at their venues" on public.events;
+create policy "Managers delete events at their venues" on public.events
+  for delete using (public.is_venue_manager(venue_id));
+
+create or replace function public.events_manager_guard()
+returns trigger
+language plpgsql
+as $$
+begin
+  if public.is_restricted_writer() then
+    new.is_featured := case when tg_op = 'INSERT' then false else old.is_featured end;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists events_manager_guard on public.events;
+create trigger events_manager_guard
+  before insert or update on public.events
+  for each row execute function public.events_manager_guard();
+
+-- Storage: <venue_id>/… for their venues, events/<event_id>/… for their events.
+create or replace function public.can_manage_media(p_name text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when (storage.foldername(p_name))[1] = 'events' then exists (
+      select 1 from public.events e
+      where e.id::text = (storage.foldername(p_name))[2] and public.is_venue_manager(e.venue_id))
+    else exists (
+      select 1 from public.venues v
+      where v.id::text = (storage.foldername(p_name))[1] and public.is_venue_manager(v.id))
+  end;
+$$;
+
+drop policy if exists "Managers upload venue media" on storage.objects;
+create policy "Managers upload venue media" on storage.objects
+  for insert with check (bucket_id = 'venue-media' and public.can_manage_media(name));
+
+drop policy if exists "Managers update venue media" on storage.objects;
+create policy "Managers update venue media" on storage.objects
+  for update using (bucket_id = 'venue-media' and public.can_manage_media(name));
+
+drop policy if exists "Managers delete venue media" on storage.objects;
+create policy "Managers delete venue media" on storage.objects
+  for delete using (bucket_id = 'venue-media' and public.can_manage_media(name));
+
+-- Admin: who manages a venue, with emails (auth.users isn't readable via the API).
+create or replace function public.admin_venue_managers(p_venue uuid)
+returns table (user_id uuid, email text, display_name text, created_at timestamptz)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+#variable_conflict use_column
+begin
+  if not public.is_admin() then
+    raise exception 'Only admins can list managers' using errcode = '42501';
+  end if;
+  return query
+  select m.user_id, u.email::text, coalesce(p.display_name, 'Member'), m.created_at
+  from public.venue_managers m
+  join auth.users u on u.id = m.user_id
+  left join public.profiles p on p.id = m.user_id
+  where m.venue_id = p_venue
+  order by m.created_at;
+end;
+$$;
+
+revoke execute on function public.admin_venue_managers(uuid) from public, anon;
+grant execute on function public.admin_venue_managers(uuid) to authenticated;

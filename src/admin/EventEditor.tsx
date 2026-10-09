@@ -11,6 +11,7 @@ import { Spinner } from '@/components/ui';
 import { Button, Field, inputClass, Panel, Toggle, useFeedback } from './ui';
 import { LocationField, type LatLng } from './LocationField';
 import { HoursEditor } from './HoursEditor';
+import { useConsole } from './console';
 
 // ---------------------------------------------------------------------------
 // Event times are entered as Nassau wall-clock time, whatever timezone the
@@ -182,7 +183,7 @@ const shortDate = (date: string) =>
 const chipClass = (on: boolean) =>
   `px-3 py-1.5 rounded-full text-xs font-extrabold ${on ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700'}`;
 
-/** "/admin/events/new" (optionally ?venue=<id>&notes=<text>, e.g. from an Inbox tip) and "/admin/events/:id". Keyed so switching events starts fresh. */
+/** "<base>/events/new" (optionally ?venue=<id>&notes=<text>, e.g. from an Inbox tip) and "<base>/events/:id", where base is /admin or /manage. Keyed so switching events starts fresh. */
 export default function EventEditorRoute() {
   const { id } = useParams();
   return <EventEditor key={id ?? 'new'} />;
@@ -195,8 +196,12 @@ function EventEditor() {
   const navigate = useNavigate();
   const { refresh } = useDirectory();
   const { toast, confirm } = useFeedback();
+  const { role, base, venueIds } = useConsole();
+  const isAdmin = role === 'admin';
+  // A manager's events always belong to one of their venues.
+  const presetVenue = params.get('venue') ?? (venueIds?.[0] ?? '');
   const [event, setEvent] = useState<NightEvent | null>(null);
-  const [form, setForm] = useState<Form | null>(isNew ? blank(params.get('venue') ?? '', params.get('notes') ?? '') : null);
+  const [form, setForm] = useState<Form | null>(isNew ? blank(presetVenue, params.get('notes') ?? '') : null);
   const [saved, setSaved] = useState<Form | null>(null);
   const [venues, setVenues] = useState<Venue[]>([]);
   const [saving, setSaving] = useState(false);
@@ -206,12 +211,11 @@ function EventEditor() {
 
   useEffect(() => {
     // All venues, drafts included: an event can be prepared before its spot goes live.
-    supabase
-      .from('venues')
-      .select('*')
-      .order('name')
-      .then(({ data }) => setVenues((data as Venue[]) ?? []));
-  }, []);
+    // A manager only gets their own.
+    let q = supabase.from('venues').select('*').order('name');
+    if (venueIds) q = q.in('id', venueIds);
+    q.then(({ data }) => setVenues((data as Venue[]) ?? []));
+  }, [venueIds]);
 
   useEffect(() => {
     if (isNew) return;
@@ -221,12 +225,13 @@ function EventEditor() {
       .eq('id', id!)
       .maybeSingle()
       .then(({ data }) => {
-        if (!data) return setMissing(true);
+        // A manager can read other venues' published events, but not edit them.
+        if (!data || (venueIds && !venueIds.includes((data as NightEvent).venue_id ?? ''))) return setMissing(true);
         setEvent(data as NightEvent);
         setForm(toForm(data as NightEvent));
         setSaved(toForm(data as NightEvent));
       });
-  }, [id, isNew]);
+  }, [id, isNew, venueIds]);
 
   const dirty = useMemo(() => !isNew && JSON.stringify(form) !== JSON.stringify(saved), [form, saved, isNew]);
   useEffect(() => {
@@ -240,7 +245,7 @@ function EventEditor() {
     return (
       <div className="text-center py-16">
         <p className="font-extrabold text-slate-700">That event doesn’t exist (or was deleted).</p>
-        <Link to="/admin/events" className="text-brand-600 font-bold">Back to events</Link>
+        <Link to={`${base}/events`} className="text-brand-600 font-bold">Back to events</Link>
       </div>
     );
   }
@@ -274,6 +279,7 @@ function EventEditor() {
       end = fromNassauInput(form.end);
       if (end < start) return toast('The end is before the start', 'error');
     }
+    if (!isAdmin && !form.venue_id) return toast('Pick which of your venues hosts it', 'error');
     if (form.own_location ? !form.location : !form.venue_id) {
       const ok = await confirm({
         title: 'Save without a location?',
@@ -305,7 +311,7 @@ function EventEditor() {
     if (error) return toast(error.message, 'error');
     refresh();
     toast(isNew ? 'Event created' : 'Saved');
-    if (isNew) return navigate(`/admin/events/${(data as NightEvent).id}`, { replace: true });
+    if (isNew) return navigate(`${base}/events/${(data as NightEvent).id}`, { replace: true });
     setEvent(data as NightEvent);
     setForm(toForm(data as NightEvent));
     setSaved(toForm(data as NightEvent));
@@ -347,7 +353,7 @@ function EventEditor() {
     await deleteMedia(event.image_path);
     refresh();
     toast('Deleted');
-    navigate('/admin/events', { replace: true });
+    navigate(`${base}/events`, { replace: true });
   };
 
   const setRepeat = (repeat: Form['repeat']) =>
@@ -389,7 +395,7 @@ function EventEditor() {
     <div className="space-y-4 max-w-3xl mx-auto pb-24">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <Link to="/admin/events" className="inline-flex items-center gap-1 text-sm font-bold text-slate-500 hover:text-slate-800 mb-1">
+          <Link to={`${base}/events`} className="inline-flex items-center gap-1 text-sm font-bold text-slate-500 hover:text-slate-800 mb-1">
             <ArrowLeft className="w-4 h-4" /> Events
           </Link>
           <h1 className="text-2xl font-black text-slate-900 truncate">{isNew ? 'New event' : event?.title}</h1>
@@ -551,7 +557,7 @@ function EventEditor() {
         <div className="space-y-4">
           <Field label="Hosted at" hint="The event uses this spot’s pin unless you set its own location below.">
             <select className={inputClass} value={form.venue_id} onChange={(e) => set('venue_id', e.target.value)}>
-              <option value="">— Not at a listed spot —</option>
+              {isAdmin && <option value="">— Not at a listed spot —</option>}
               {venues.map((v) => (
                 <option key={v.id} value={v.id}>
                   {v.name}
@@ -624,8 +630,9 @@ function EventEditor() {
             checked={form.is_published}
             onChange={(v) => set('is_published', v)}
             label="Published"
-            hint={form.is_published ? 'Listed on Events, the Explore rail and the map.' : 'Draft — only admins can see it.'}
+            hint={form.is_published ? 'Listed on Events, the Explore rail and the map.' : isAdmin ? 'Draft — only admins can see it.' : 'Draft — only you and the Nassau Nights team can see it.'}
           />
+          {isAdmin && (
           <div className="border-t border-slate-100 pt-5">
             <Toggle
               checked={form.is_featured}
@@ -634,6 +641,7 @@ function EventEditor() {
               hint="Pinned first on the Events page and the Explore rail, with a gold badge."
             />
           </div>
+          )}
           {!isNew && (
             <div className="border-t border-slate-100 pt-5">
               <Button variant="secondary" onClick={remove} className="text-rose-600">

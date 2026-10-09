@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, Clock, KeyRound, Loader2, LogOut, MailCheck, MessageSquarePlus, PartyPopper, Pencil, Shield, Star, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronRight, Clock, KeyRound, Loader2, LogOut, MailCheck, MessageSquarePlus, PartyPopper, Pencil, Shield, Star, Store, XCircle } from 'lucide-react';
 import { authLinkError, supabase, supabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
 import { SUBMISSION_KIND_LABELS, type SubmissionKind, type SubmissionStatus } from '@/lib/types';
 import { SetupNotice } from '@/components/SetupNotice';
-import { Spinner, Stars } from '@/components/ui';
+import { SafeImg, Spinner, Stars } from '@/components/ui';
 import { ActivitySharingToggle } from '@/components/ActivityConsent';
 
 const input =
@@ -221,6 +221,14 @@ interface MyReview {
   updated_at: string;
   venues: { name: string; slug: string } | null;
 }
+interface ManagedVenue {
+  id: string;
+  name: string;
+  slug: string;
+  area: string | null;
+  cover_url: string | null;
+  is_published: boolean;
+}
 interface MySubmission {
   id: string;
   kind: SubmissionKind;
@@ -245,6 +253,7 @@ function SignedIn() {
   const [name, setName] = useState('');
   const [reviews, setReviews] = useState<MyReview[] | null>(null);
   const [subs, setSubs] = useState<MySubmission[] | null>(null);
+  const [managed, setManaged] = useState<ManagedVenue[]>([]);
   const [nameError, setNameError] = useState<string | null>(null);
 
   // Arrived via "sign in to review" → go straight back once signed in.
@@ -262,6 +271,19 @@ function SignedIn() {
       .order('updated_at', { ascending: false })
       .then(({ data }) => setReviews((data as unknown as MyReview[]) ?? []));
     supabase.rpc('my_submissions').then(({ data }) => setSubs((data as MySubmission[]) ?? []));
+    // Venues an admin has made this member a manager of (usually none).
+    supabase
+      .from('venue_managers')
+      .select('venues(id, name, slug, area, cover_url, is_published)')
+      .eq('user_id', session.user.id)
+      .then(({ data }) =>
+        setManaged(
+          ((data ?? []) as unknown as { venues: ManagedVenue | null }[])
+            .map((r) => r.venues)
+            .filter((v): v is ManagedVenue => !!v)
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        ),
+      );
   }, [session]);
 
   const saveName = async () => {
@@ -316,6 +338,41 @@ function SignedIn() {
           </button>
         </div>
       </section>
+
+      {managed.length > 0 && (
+        <section className="bg-night-900 rounded-[1.75rem] border border-glow-400/30 p-5 md:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <h2 className="flex items-center gap-2 font-display text-xl font-bold text-white">
+              <Store className="w-5 h-5 text-glow-300" /> Venue manager
+            </h2>
+            <Link to="/manage" className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-brand-500 to-glow-500 text-white text-sm font-extrabold glow-brand-soft">
+              Open venue manager <ChevronRight className="w-4 h-4" />
+            </Link>
+          </div>
+          <p className="text-sm font-semibold text-night-300 mb-3">
+            Update your listing{managed.length > 1 ? 's' : ''}: details, hours, photos, drinks and food menus, and events.
+          </p>
+          <ul className="grid sm:grid-cols-2 gap-2">
+            {managed.map((v) => (
+              <li key={v.id}>
+                <Link to={`/manage/v/${v.id}`} className="flex items-center gap-3 p-2.5 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10">
+                  <span className="w-12 h-12 rounded-xl overflow-hidden bg-white/5 shrink-0">
+                    <SafeImg src={v.cover_url} name={v.name} className="w-full h-full" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-extrabold text-white truncate">{v.name}</span>
+                    <span className="block text-xs font-semibold text-night-300 truncate">
+                      {v.is_published ? 'Live' : 'Draft'}
+                      {v.area ? ` · ${v.area}` : ''}
+                    </span>
+                  </span>
+                  <Pencil className="w-4 h-4 text-night-300 shrink-0" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="bg-night-900 rounded-[1.75rem] border border-white/10 p-5 md:p-6">
         <h2 className="flex items-center gap-2 font-display text-xl font-bold text-white mb-4">

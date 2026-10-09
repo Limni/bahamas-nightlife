@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { useDirectory } from '@/lib/directory';
 import type { TagKind } from '@/lib/types';
 import { useFeedback } from './ui';
+import { useConsole } from './console';
 
 /**
  * Pick from the managed vocabulary for a tag kind, or add a new option on the
@@ -22,6 +23,8 @@ export function TagPicker({
   single?: boolean;
 }) {
   const { tagsOf, refresh } = useDirectory();
+  // Only admins can add to the shared vocabulary (RLS agrees).
+  const { role } = useConsole();
   const { toast } = useFeedback();
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState('');
@@ -68,7 +71,7 @@ export function TagPicker({
           </button>
         );
       })}
-      {adding ? (
+      {role !== 'admin' ? null : adding ? (
         <form
           onSubmit={(e) => {
             e.preventDefault();

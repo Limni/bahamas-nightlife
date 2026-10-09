@@ -12,6 +12,8 @@ import { HoursEditor } from './HoursEditor';
 import { TagPicker } from './TagPicker';
 import { PhotoManager } from './PhotoManager';
 import { MenuEditor } from './MenuEditor';
+import { useConsole } from './console';
+import { VenueManagersPanel } from './VenueManagers';
 
 interface Form {
   name: string;
@@ -74,6 +76,8 @@ export default function VenueEditor() {
   const navigate = useNavigate();
   const { refresh } = useDirectory();
   const { toast, confirm } = useFeedback();
+  const { role, base } = useConsole();
+  const isAdmin = role === 'admin';
   const [venue, setVenue] = useState<Venue | null>(null);
   const [form, setForm] = useState<Form | null>(null);
   const [saved, setSaved] = useState<Form | null>(null);
@@ -95,6 +99,13 @@ export default function VenueEditor() {
       });
   }, [id]);
 
+  // Deep links like /manage/v/:id#menu: scroll once the panels exist.
+  const loaded = !!venue;
+  useEffect(() => {
+    if (!loaded || !window.location.hash) return;
+    document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ behavior: 'smooth' });
+  }, [loaded]);
+
   const dirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(saved), [form, saved]);
 
   // Warn before leaving with unsaved edits.
@@ -109,7 +120,7 @@ export default function VenueEditor() {
     return (
       <div className="text-center py-16">
         <p className="font-extrabold text-slate-700">That spot doesn’t exist (or was deleted).</p>
-        <Link to="/admin" className="text-brand-600 font-bold">Back to spots</Link>
+        <Link to={base} className="text-brand-600 font-bold">{isAdmin ? 'Back to spots' : 'Back to my venues'}</Link>
       </div>
     );
   }
@@ -127,11 +138,21 @@ export default function VenueEditor() {
     const f = { ...form, ...overrides };
     if (!f.name.trim()) return toast('Name can’t be empty', 'error');
     setSaving(true);
+    // Managers don't send the admin-only fields (the database ignores them anyway).
+    const adminOnly = isAdmin
+      ? {
+          slug: f.slug.trim() || null,
+          radius_m: Math.round(Math.min(400, Math.max(15, f.radius_m))),
+          is_published: f.is_published,
+          is_featured: f.is_featured,
+          featured_until: f.is_featured && f.featured_until ? new Date(`${f.featured_until}T23:59:59-05:00`).toISOString() : null,
+        }
+      : {};
     const { data, error } = await supabase
       .from('venues')
       .update({
+        ...adminOnly,
         name: f.name.trim(),
-        slug: f.slug.trim() || null,
         description: orNull(f.description),
         categories: f.categories,
         vibes: f.vibes,
@@ -144,12 +165,8 @@ export default function VenueEditor() {
         address: orNull(f.address),
         lat: f.location?.lat ?? null,
         lng: f.location?.lng ?? null,
-        radius_m: Math.round(Math.min(400, Math.max(15, f.radius_m))),
         hours: Object.keys(f.hours).length ? f.hours : null,
         hours_note: orNull(f.hours_note),
-        is_published: f.is_published,
-        is_featured: f.is_featured,
-        featured_until: f.is_featured && f.featured_until ? new Date(`${f.featured_until}T23:59:59-05:00`).toISOString() : null,
       })
       .eq('id', venue.id)
       .select('*')
@@ -210,8 +227,8 @@ export default function VenueEditor() {
     <div className="space-y-4 max-w-3xl mx-auto pb-24">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <Link to="/admin" className="inline-flex items-center gap-1 text-sm font-bold text-slate-500 hover:text-slate-800 mb-1">
-            <ArrowLeft className="w-4 h-4" /> Spots
+          <Link to={base} className="inline-flex items-center gap-1 text-sm font-bold text-slate-500 hover:text-slate-800 mb-1">
+            <ArrowLeft className="w-4 h-4" /> {isAdmin ? 'Spots' : 'My venues'}
           </Link>
           <h1 className="text-2xl font-black text-slate-900 truncate">{venue.name}</h1>
           <span className={`inline-block mt-1 px-2 py-0.5 rounded-md text-[11px] font-extrabold uppercase ${venue.is_published ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>
@@ -317,6 +334,7 @@ export default function VenueEditor() {
           <Field label="Address / directions">
             <input className={inputClass} value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="e.g. West Bay St, next to the Fish Fry" />
           </Field>
+          {isAdmin && (
           <Field
             label={`Activity radius · ${form.radius_m} m`}
             hint="Phones within this distance of the pin count as “here” for live activity. ~40 m for a small bar, 80–150 m for a beach bar or big club."
@@ -331,6 +349,7 @@ export default function VenueEditor() {
               className="w-full max-w-sm accent-brand-600"
             />
           </Field>
+          )}
         </div>
       </Panel>
 
@@ -346,14 +365,14 @@ export default function VenueEditor() {
       <Panel
         title="Events here"
         action={
-          <Link to={`/admin/events/new?venue=${venue.id}`} className="inline-flex items-center gap-1.5 text-sm font-extrabold text-brand-700 hover:underline">
+          <Link to={`${base}/events/new?venue=${venue.id}`} className="inline-flex items-center gap-1.5 text-sm font-extrabold text-brand-700 hover:underline">
             <CalendarPlus className="w-4 h-4" /> New event
           </Link>
         }
       >
         <p className="text-sm font-semibold text-slate-500">
           Highlight a DJ night, live band or party at this spot. It glows on the map while it’s on. See all in{' '}
-          <Link to="/admin/events" className="font-extrabold text-brand-700 hover:underline">Events</Link>.
+          <Link to={`${base}/events`} className="font-extrabold text-brand-700 hover:underline">Events</Link>.
         </p>
       </Panel>
 
@@ -374,6 +393,19 @@ export default function VenueEditor() {
         </div>
       </Panel>
 
+      {isAdmin && <VenueManagersPanel venueId={venue.id} venueName={venue.name} />}
+
+      {!isAdmin && (
+        <Panel title="Visibility" id="visibility">
+          <p className="text-sm font-semibold text-slate-600">
+            {venue.is_published ? 'Your listing is live.' : 'Your listing is a draft; the Nassau Nights team will publish it.'} Publishing, featured
+            placement, the web address and reviews are handled by the Nassau Nights team. Reviews and likes come from visitors and can’t be edited
+            here.
+          </p>
+        </Panel>
+      )}
+
+      {isAdmin && (
       <Panel title="Visibility" id="visibility">
         <div className="space-y-5">
           <Toggle
@@ -407,6 +439,7 @@ export default function VenueEditor() {
           </div>
         </div>
       </Panel>
+      )}
 
       {/* Sticky save bar */}
       <div className="fixed inset-x-0 bottom-[calc(68px+env(safe-area-inset-bottom))] md:bottom-0 z-[1400] pointer-events-none">

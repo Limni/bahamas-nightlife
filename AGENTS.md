@@ -9,7 +9,7 @@ Guidance for AI coding agents (and humans) working in this repository. Read this
 - **Highlighted events**, ported from Island GO (`Limni/bahamas-exp`). Events are one-off (a date range) or **weekly/recurring** (weekly hours, optionally with no end date: "Ladies Night every Friday"), and live ones pulse on the map.
 - **Live, GPS-based activity.** Visitors who opt in send anonymous presence pings. The database turns them into "how busy is it now" per venue, compared with that venue's usual for the weekday and hour (8-week average), plus 30-day popularity. It updates in real time over Supabase Realtime.
 
-Everything else is Nassau Eats: directory, map, venue pages with drinks menus/photos/reviews, member accounts, community suggestions and the phone-friendly admin console.
+Everything else is Nassau Eats: directory, map, venue pages with drinks menus/photos/reviews, member accounts, community suggestions and the phone-friendly admin console. On top, admins can make members **venue managers** who update their own venues from `/manage`.
 
 It is a static React SPA with **no custom backend** (the one exception is a Supabase Edge Function, `invite-member`, for member invitations). All data, auth and file storage go through **its own Supabase project** (not Nassau Eats'), protected by Postgres row-level security (RLS). It is deployed as an nginx Docker container on the same VM as Island GO (port 5050) and Nassau Eats (5060), on port **5110**.
 
@@ -100,8 +100,11 @@ src/
     EventPage.tsx          "/events/:id"
     Community.tsx          "/community" suggestions form + community wins
     Account.tsx            "/account" sign in/up/reset, profile, my reviews, my suggestions
-  admin/                   "/admin/*" console (lazy-loaded, never in the visitor bundle)
+  admin/                   "/admin/*" console and "/manage/*" venue manager (lazy-loaded, never in the visitor bundle)
     AdminApp.tsx           admin login gate, shell, nav, routes
+    ManagerApp.tsx         "/manage": venue managers' shell (My venues, Events), reusing the editors below
+    console.tsx            ConsoleProvider/useConsole: role admin|manager, link base, the manager's venueIds
+    VenueManagers.tsx      VenueManagersPanel (admin, on a spot) + MemberVenues (admin, on a member)
     ui.tsx                 FeedbackProvider (toasts + confirm), Field, Panel, Button, Toggle
     VenuesList.tsx         all spots incl. drafts, "needs info" flags
     QuickAdd.tsx           field capture: GPS + photos -> draft
@@ -144,10 +147,11 @@ README.md, DEPLOY.md       human docs
 | `/events/:id` | EventPage | also loads past events and (for admins) drafts |
 | `/community` | Community | `?kind=new_spot\|update\|closed\|event\|other&venue=<id>&field=menu\|photos\|hours\|phone` pre-fills the form |
 | `/account` | Account | `?mode=signup`, `?next=/path` (in-app paths only; validated by `safeNext`); `#activity` is the sharing switch |
+| `/manage/*` | ManagerApp | `/manage` (My venues), `/manage/v/:id` (own venues only; `#menu` etc. scroll to a panel), `/manage/events`, `/manage/events/new?venue=`, `/manage/events/:id`. Signed out → `/account?next=/manage` |
 | `/admin/*` | AdminApp | `/admin`, `/admin/new`, `/admin/v/:id`, `/admin/events`, `/admin/events/new?venue=&notes=`, `/admin/events/:id`, `/admin/inbox`, `/admin/activity`, `/admin/reviews`, `/admin/users`, `/admin/tags`, `/admin/theme` |
 | `*` | → `/` | |
 
-Public pages render inside `<Layout/>` (5 tabs: Explore, Map, Events, Community, Account). `/admin` does not; it has its own light shell. The admin console is reachable **only by URL**, except an "Admin console" button on `/account` for admins.
+Public pages render inside `<Layout/>` (5 tabs: Explore, Map, Events, Community, Account). `/admin` does not; it has its own light shell. The admin console is reachable **only by URL**, except an "Admin console" button on `/account` for admins. `/manage` has its own light shell too, linked from a **Venue manager** card on `/account` for members who manage a venue.
 
 Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > DirectoryProvider > LocationProvider > ActivityProvider > FiltersProvider > Suspense > Routes`.
 
@@ -189,6 +193,7 @@ Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > Dir
 | `venues` | listings | `slug` (unique, auto-generated from the name by a trigger if empty), `name`, `description`, `categories text[]` (venue types), `vibes text[]`, `area`, `price_level 1–4`, `phone`, `website`, `instagram`, `facebook`, `address`, `lat`, `lng`, `hours jsonb`, `hours_note`, `cover_url`, `is_published`, `is_featured`, `featured_until`, `google_place_id` (unique, set by the importer), **`radius_m` (15–400, default 60: activity geofence)**, `created_at`, `updated_at` (auto via trigger) |
 | `venue_photos` | gallery + menu photos | `kind 'gallery'\|'menu'\|'food_menu'` (`menu` = photos of the **drinks** menu, the original kind), `url`, `storage_path` (for deletes), `caption`, `sort` |
 | `menu_items` | structured menus | **`menu 'drinks'\|'food'`** (added later; existing items were sorted once by food-sounding section names), `section`, `name`, `description`, `price numeric(10,2)`, `sort`, `photo_url`/`photo_path` (one optional photo, `<venue_id>/items/…`), **`like_count`** (kept by a security-definer trigger on `menu_item_likes`; re-running the schema recounts) |
+| `venue_managers` | who manages which venue | `(venue_id, user_id)` PK (a member can manage several venues, a venue can have several managers), `created_by`, `created_at`. Cascades with the venue and the auth user |
 | `menu_item_likes` | likes on menu items | `(item_id, user_id)` PK (one like per member per item), `user_id` default `auth.uid()` → `profiles`, `created_at`. Cascades with the item and the member |
 | `tags` | filter vocabularies | `kind 'category'\|'vibe'\|'area'`, `label`, `sort`; unique `(kind,label)`; seeded with starter values |
 | `submissions` | community suggestions | `kind 'new_spot'\|'update'\|'closed'\|'event'\|'other'`, `venue_id`, `venue_name`, `fields text[]`, `message`, `contact_name`, `contact_email`, `credit_ok`, `photo_paths text[]` (≤6), `status 'new'\|'reviewing'\|'done'\|'dismissed'`, `admin_note` (private), `resolved_at` (trigger-set), `user_id` (default `auth.uid()`, null for anonymous) |
@@ -207,12 +212,13 @@ Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > Dir
 
 | Data | Who can read | Who can write |
 | --- | --- | --- |
-| `venues`, `venue_photos`, `menu_items` | published rows (or the photos/items of published rows) for anyone; everything for admins | admins only |
+| `venues`, `venue_photos`, `menu_items` | published rows (or the photos/items of published rows) for anyone; everything for admins; their own venues (drafts too) for managers | admins; **managers** update their venues (not insert/delete a venue) and fully manage their photos and menu items |
+| `venue_managers` | own rows (+ admins) | admins only |
 | `tags` | everyone | admins |
 | `site_settings` | everyone | admins update (no insert/delete; the row is seeded) |
 | `submissions` | admins | **anyone can insert**, but only as `status='new'` with no `admin_note`/`resolved_at` and `user_id` null or self; admins update/delete |
 | `profiles` | everyone (only `display_name` exists) | the owner updates their own (not while suspended); admins update any |
-| `events` | published for anyone; everything for admins | admins only |
+| `events` | published for anyone; everything for admins; managers also see their venues' drafts | admins; managers insert/update/delete events whose `venue_id` is one of their venues (they can't move one elsewhere or create one without a venue) |
 | `presence` | nobody | only `report_presence()` / housekeeping (security definer) |
 | `venue_live`, `venue_typical`, `venue_stats` | everyone (aggregates only) | only the activity functions |
 | `venue_hourly` | admins | only the activity functions |
@@ -235,6 +241,7 @@ Only admins may change `reviews.is_hidden`. The `reviews_guard` trigger forces `
   - `admin_confirm_user(p_user)`: sets `email_confirmed_at` when the confirmation email never arrived.
   - `admin_delete_user(p_user)`: clears their `storage.objects` ownership (Auth refuses to delete users who own objects; the suggestion photos stay), then deletes from `auth.users`. Profile and reviews cascade; suggestions stay, unlinked. Not yourself, not an admin.
   - `admin_list_users` also returns `invited_at` and takes `p_filter = 'invited'` (invited, not yet accepted). Its result columns changed once, so `schema.sql` drops it before creating it.
+- **Venue managers:** `is_venue_manager(p_venue)`, `can_manage_media(p_name)` (storage policies), `is_restricted_writer()` (an `anon`/`authenticated` caller who isn't an admin; the guard triggers use it, so security-definer functions, the service role and the SQL editor pass), and `admin_venue_managers(p_venue)` → `user_id, email, display_name, created_at` (admins only). `admin_list_users` also returns `venue_count` and takes `p_filter = 'managers'`.
 - **Edge Function `invite-member`** (`supabase/functions/invite-member/index.ts`, deployed by the owner; "Verify JWT" on). Body `{ email, display_name?, make_admin?, redirect_to? }`. It checks `is_admin()` **with the caller's token**, then uses the service-role key (only ever inside the function) for `auth.admin.generateLink({ type: 'invite' })`: that creates the account and the one-time accept link **without Supabase sending anything**. Supabase's own invite email isn't used because the free plan can't edit templates (and its mailer only reaches the project team). User metadata: `display_name` (→ the profile via `handle_new_user`) and `invited_by` (the inviter's display name). `make_admin` also inserts into `admins`. If secrets `RESEND_API_KEY` + `INVITE_FROM` are set it emails our styled invitation (`inviteEmail()` in the same file: inline styles + tables, HTML-escaped names, plain-text part) via the Resend API → `{ user_id, emailed: true }`; otherwise, or if sending fails, `{ user_id, emailed: false, link, warning? }` and the admin shares the link. 403 non-admin, 400 bad email, 409 already registered; re-inviting someone who hasn't accepted makes a fresh link.
 - **Activity** (all security definer):
   - `report_presence(p_device uuid, p_lat, p_lng, p_accuracy)` → venue id or null. Granted to anon/authenticated. Rate-limited to one ping per device per 45 s. Accuracy ≤ 100 m: nearest published venue whose `radius_m` (+ ≤ 30 m GPS slack) contains the fix (bounding-box prefilter). Accuracy > 100 m: keeps the device at its current venue if the fix still covers it, else changes nothing. Not at a venue → the device's row is deleted. A visit counts after **DWELL = 4 min**; it stops counting **STALE = 15 min** after the last ping; each counted visit adds 1 visitor per hour (and 1 arrival per visit) to `venue_hourly`. Runs `activity_housekeeping()` on ~2% of pings.
@@ -302,6 +309,12 @@ Ported from Island GO's map, on a dark basemap:
 - Arriving from an **invitation** link: "Welcome to Nassau Nights", with name (pre-filled from the invite) + password, then the signed-in view. An expired or used email link shows a notice above the sign-in form.
 - Signed in: avatar initial, editable display name, email (shown privately), Admin console link (admins), Sign out, **My reviews**, and **My suggestions** with status (Received / In progress / Applied / Not applied).
 
+### Venue manager (`/manage`)
+- An admin assigns members to venues (spot editor → **Managers**: search members, add/remove; or Members → a member → **Venues they manage**). A member can manage several venues.
+- Members with at least one venue get a **Venue manager** card on `/account` (their venues + "Open venue manager").
+- `/manage` (light, phone-first, bottom tabs My venues / Events / Account): venue cards (Live/Draft, rating, live level, upcoming events; Edit details, Menus, New event, View page), then the **same editors as the admin** under `ConsoleProvider` with `role: 'manager'`: `VenueEditor` without the activity radius, Visibility controls (a read-only note instead), slug, delete or Managers panel; `TagPicker` without "New"; `EventEditor` limited to their venues (no "not at a listed spot", no Featured); `EventsList` filtered to their venues. `PhotoManager` / `MenuEditor` work unchanged.
+- Enforced in the database, not just the UI: `is_venue_manager(venue)` (assigned **and** not suspended) in extra policies on venues/photos/menu items/events and the `venue-media` bucket (`can_manage_media(name)`: `<venue_id>/…` or `events/<event_id>/…`). Guard triggers (`venues_manager_guard`, `events_manager_guard`, `menu_items_like_guard`) silently keep admin-only columns for API callers who aren't admins: `is_published`, `is_featured`, `featured_until`, `slug`, `radius_m`, `google_place_id`, events' `is_featured`, and `like_count` for everyone. Reviews and likes keep their own policies, so managers can't touch them.
+
 ### Admin console (`/admin`)
 - **Login gate:** Supabase email + password. Non-admins see SQL to grant access. The console is phone-first and light (`colorScheme: light`): a 5-tab bottom bar (Spots, Events, Quick add, Inbox, Activity); Reviews / Members / Tags / Theme are icons in the phone header.
 - **Events:** list (Upcoming / Live now / Drafts / Past, with "No pin" and "Weekly" flags) and editor: title, description, price note, ticket link; **One-off** (start/end in **Nassau time** with presets: Tonight 10 PM–2 AM, Fri/Sat 10 PM–3 AM, Sun 4–9 PM) or **Every week** (night chips + one time window, or different times per night via `HoursEditor`; weekly presets; first night; **No end date** on by default, else a last night). A weekly run is stored as `start_date` = 6 AM on the first night and `end_date` = 6 AM after the last night (null with no end), so overnight sessions count and the night before doesn't; host venue (drafts included) and/or its own location; flyer upload (after the first save, to `events/<id>/`); Published / Featured; delete removes the flyer file. The venue editor links to "New event" with the venue preset, and an Inbox "Event tip" becomes **Create event** (`?venue=&notes=`).
@@ -327,7 +340,7 @@ Ported from Island GO's map, on a dark basemap:
   - "Create draft" for new-spot suggestions, "Create event" for event tips, and a private note per suggestion.
   - Marking a suggestion Done credits the sender's first name publicly if they opted in.
 - **Reviews:** Latest / 1–2 stars / Hidden. Hide (stops it counting; the author still sees it) or Delete.
-- **Members** (`/admin/users`, a header icon on phones): **Invite** (email, optional name, "Make them an admin too"; calls `invite-member` and says so if the function isn't deployed). When no email went out, a share box shows the link with Copy / WhatsApp / Email app (`mailto:`) / Share…, server-side search by name/email/id, All / Admins / Suspended / Invited / Unconfirmed, 50 at a time. Pending invites show an **Invited** badge and **Resend invite**. Expanding a member shows joined / last sign-in / confirmation, rename (display name), Make/Remove admin, Confirm email, **Send password reset** (`resetPasswordForEmail`, back to `/account`), Suspend for 1 / 7 / 30 days or indefinitely (signs them out; they can't sign in, review or rename), Lift suspension, Delete account, plus their reviews (hide/unhide) and suggestions. Your own row has no account actions; admins must be demoted before they can be suspended or deleted. Setting someone's password isn't offered (needs the service-role key; send a reset instead).
+- **Members** (`/admin/users`, a header icon on phones): **Invite** (email, optional name, "Make them an admin too"; calls `invite-member` and says so if the function isn't deployed). When no email went out, a share box shows the link with Copy / WhatsApp / Email app (`mailto:`) / Share…, server-side search by name/email/id, All / Admins / Managers / Suspended / Invited / Unconfirmed, 50 at a time. A **Manager · n** badge and, expanded, **Venues they manage** (add/remove). Pending invites show an **Invited** badge and **Resend invite**. Expanding a member shows joined / last sign-in / confirmation, rename (display name), Make/Remove admin, Confirm email, **Send password reset** (`resetPasswordForEmail`, back to `/account`), Suspend for 1 / 7 / 30 days or indefinitely (signs them out; they can't sign in, review or rename), Lift suspension, Delete account, plus their reviews (hide/unhide) and suggestions. Your own row has no account actions; admins must be demoted before they can be suspended or deleted. Setting someone's password isn't offered (needs the service-role key; send a reset instead).
 - **Tags:** add, reorder and remove the category / vibe / area options, with usage counts. Removing a tag doesn't strip it from existing spots.
 - **Theme:** cards for each site theme with a mini preview, **Preview** (opens `/?theme=<id>` in a new tab) and **Make live**, which updates `site_settings.theme` for every visitor.
 - Admin UI uses `useFeedback()` toasts and confirms. **Never use `window.alert` / `window.confirm`.**
@@ -452,6 +465,7 @@ The full runbook is in **`DEPLOY.md`**. The essentials:
 - **Admin feedback:** `useFeedback().toast/confirm`, never browser dialogs.
 - **Bundle split:** the admin code and Leaflet pages are `lazy()`. Don't import `src/admin/*` from public pages. Vendor chunks (react, supabase, leaflet, motion) are split in `vite.config.ts`.
 - **Security:** keep all authorization in RLS and security-definer RPCs. Never trust the client for `is_hidden`, `status`, `admin_note`, or `user_id`. Public RPCs must never expose emails or `admin_note`.
+- **Shared editors:** anything under `src/admin/` that `/manage` also renders (VenueEditor, EventEditor, EventsList, TagPicker, PhotoManager, MenuEditor…) must build links from `useConsole().base` and hide admin-only controls when `role === 'manager'`. A new admin-only column needs adding to the guard trigger too.
 - **Activity privacy:** never store coordinates, never expose `presence` or per-device data, keep the < 2 floor in every read path, and keep the device id anonymous (not the auth user id). New activity reads go through aggregate tables or security-definer functions.
 - **Comments in code** explain *why* (constraints, gotchas), matching the existing style. Keep it that way.
 

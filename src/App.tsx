@@ -19,6 +19,7 @@ const EventPage = lazy(() => import('@/pages/EventPage'));
 const Community = lazy(() => import('@/pages/Community'));
 const Account = lazy(() => import('@/pages/Account'));
 const AdminApp = lazy(() => import('@/admin/AdminApp'));
+const ManagerApp = lazy(() => import('@/admin/ManagerApp'));
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -56,6 +57,7 @@ export default function App() {
                   <Route path="account" element={<Account />} />
                 </Route>
                 <Route path="admin/*" element={<AdminApp />} />
+                <Route path="manage/*" element={<ManagerApp />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </Suspense>
