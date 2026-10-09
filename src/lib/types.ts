@@ -134,8 +134,9 @@ export interface NightEvent {
   lng: number | null;
   address: string | null;
   start_date: string;
-  end_date: string;
-  /** Optional weekly windows inside the date range (same format as venue hours). */
+  /** Null = repeats every week (per `hours`) until an admin ends it. */
+  end_date: string | null;
+  /** Optional weekly windows inside the date range (same format as venue hours); set = a weekly/recurring event. */
   hours: WeeklyHours | null;
   image_url: string | null;
   image_path: string | null;

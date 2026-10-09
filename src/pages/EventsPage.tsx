@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarHeart, CalendarPlus, Map as MapIcon } from 'lucide-react';
 import { useDirectory } from '@/lib/directory';
-import { compareEvents, isEventEnded, isEventLive, isEventSoon } from '@/lib/events';
+import { compareEvents, eventNextStart, isEventEnded, isEventLive, isEventSoon } from '@/lib/events';
 import { supabaseConfigured } from '@/lib/supabase';
 import { useNow } from '@/lib/useNow';
 import type { NightEvent } from '@/lib/types';
@@ -38,11 +38,11 @@ export default function EventsPage() {
   const groups = useMemo(() => {
     let list = events.filter((e) => !isEventEnded(e, now)).sort(compareEvents(now));
     if (range === 'tonight') list = list.filter((e) => isEventSoon(e, now));
-    if (range === 'week') list = list.filter((e) => new Date(e.start_date).getTime() - now < WEEK_MS);
+    if (range === 'week') list = list.filter((e) => eventNextStart(e, now) - now < WEEK_MS);
     if (range === 'featured') list = list.filter((e) => e.is_featured);
     const live = list.filter((e) => isEventLive(e, now));
     const tonight = list.filter((e) => !isEventLive(e, now) && isEventSoon(e, now));
-    const week = list.filter((e) => !live.includes(e) && !tonight.includes(e) && new Date(e.start_date).getTime() - now < WEEK_MS);
+    const week = list.filter((e) => !live.includes(e) && !tonight.includes(e) && eventNextStart(e, now) - now < WEEK_MS);
     const later = list.filter((e) => !live.includes(e) && !tonight.includes(e) && !week.includes(e));
     return { live, tonight, week, later, total: list.length };
   }, [events, now, range]);

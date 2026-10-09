@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarHeart, MapPinOff, Plus, Search, Star } from 'lucide-react';
+import { CalendarHeart, MapPinOff, Plus, Repeat, Search, Star } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { compareEvents, eventPosition, eventWhen, isEventEnded, isEventLive } from '@/lib/events';
+import { compareEvents, eventPosition, eventWhen, isEventEnded, isEventLive, isRecurring } from '@/lib/events';
 import type { NightEvent, Venue } from '@/lib/types';
 import { useNow } from '@/lib/useNow';
 import { Spinner } from '@/components/ui';
@@ -118,6 +118,11 @@ export default function EventsList() {
                     <div className="flex flex-wrap gap-1 mt-1">
                       {live && <span className="px-1.5 py-0.5 rounded-md bg-brand-600 text-white text-[10px] font-extrabold uppercase">Live</span>}
                       {!e.is_published && <span className="px-1.5 py-0.5 rounded-md bg-slate-200 text-slate-600 text-[10px] font-extrabold uppercase">Draft</span>}
+                      {isRecurring(e) && (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-brand-50 text-brand-700 text-[10px] font-extrabold uppercase">
+                          <Repeat className="w-3 h-3" /> {e.end_date ? 'Weekly' : 'Weekly · no end'}
+                        </span>
+                      )}
                       {e.is_featured && (
                         <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[10px] font-extrabold uppercase">
                           <Star className="w-3 h-3" /> Featured

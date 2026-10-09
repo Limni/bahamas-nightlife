@@ -12,7 +12,7 @@ import { DAY_NAMES, isOpenNow, todayIndex } from '@/lib/hours';
 import { pinStyleFor } from '@/lib/markers';
 import { hasLocation, isFeatured, priceLabel, type Venue } from '@/lib/types';
 import { buzzScore, useActivity } from '@/lib/activity';
-import { compareEvents, isEventEnded, isEventLive, isEventSoon } from '@/lib/events';
+import { compareEvents, eventNextStart, isEventEnded, isEventLive, isEventSoon } from '@/lib/events';
 import { useNow } from '@/lib/useNow';
 import { useSiteTheme } from '@/lib/theme';
 import { supabaseConfigured } from '@/lib/supabase';
@@ -205,7 +205,7 @@ function LiveBoard({ venues, counts, now }: { venues: Venue[]; counts: [string, 
           <span className="font-bold text-white truncate">{e.title}</span>
           <span className="leader" />
           <span className={`shrink-0 text-xs font-extrabold ${isEventLive(e, now) ? 'text-brand-300' : 'text-glow-300'}`}>
-            {isEventLive(e, now) ? 'LIVE' : new Intl.DateTimeFormat('en-US', { timeZone: 'America/Nassau', hour: 'numeric' }).format(new Date(e.start_date))}
+            {isEventLive(e, now) ? 'LIVE' : new Intl.DateTimeFormat('en-US', { timeZone: 'America/Nassau', hour: 'numeric' }).format(new Date(eventNextStart(e, now)))}
           </span>
         </Link>
       </li>

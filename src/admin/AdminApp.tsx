@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Route, Routes, Link } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
-import { Activity, CalendarHeart, ExternalLink, Inbox as InboxIcon, ListChecks, LogOut, Palette, Plus, Star, Tags, Martini } from 'lucide-react';
+import { Activity, CalendarHeart, ExternalLink, Inbox as InboxIcon, ListChecks, LogOut, Palette, Plus, Star, Tags, Martini, Users } from 'lucide-react';
 import { supabase, supabaseConfigured } from '@/lib/supabase';
 import { SetupNotice } from '@/components/SetupNotice';
 import { Spinner } from '@/components/ui';
@@ -16,6 +16,7 @@ import ThemeSettings from './ThemeSettings';
 import EventsList from './EventsList';
 import EventEditor from './EventEditor';
 import ActivityAdmin from './ActivityAdmin';
+import UsersAdmin from './UsersAdmin';
 
 // The public site is dark; the console is a light, functional tool.
 const LIGHT = { colorScheme: 'light' } as const;
@@ -85,6 +86,7 @@ const NAV = [
   { to: '/admin/inbox', label: 'Inbox', icon: InboxIcon, end: false, phone: true },
   { to: '/admin/activity', label: 'Activity', icon: Activity, end: false, phone: true },
   { to: '/admin/reviews', label: 'Reviews', icon: Star, end: false, phone: false },
+  { to: '/admin/users', label: 'Members', icon: Users, end: false, phone: false },
   { to: '/admin/tags', label: 'Tags', icon: Tags, end: false, phone: false },
   { to: '/admin/theme', label: 'Theme', icon: Palette, end: false, phone: false },
 ];
@@ -169,6 +171,7 @@ function Shell({ session }: { session: Session }) {
           <Route path="events" element={<EventsList />} />
           <Route path="events/:id" element={<EventEditor />} />
           <Route path="activity" element={<ActivityAdmin />} />
+          <Route path="users" element={<UsersAdmin meId={session.user.id} />} />
         </Routes>
       </main>
 

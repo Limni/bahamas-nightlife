@@ -105,7 +105,11 @@ from (values
    'demo-blue-note', null, null, null,
    date_trunc('day', now() at time zone 'America/Nassau') at time zone 'America/Nassau' + interval '3 days 21 hours',
    date_trunc('day', now() at time zone 'America/Nassau') at time zone 'America/Nassau' + interval '4 days 1 hour',
-   null, null, false)
+   null, null, false),
+  ('Demo · Ladies Night', 'DEMO EVENT (fictional). Every Friday, until further notice: R&B and dancehall, ladies free before midnight.',
+   'demo-neon-palms', null, null, null,
+   date_trunc('day', now() at time zone 'America/Nassau') at time zone 'America/Nassau' - interval '30 days' + interval '6 hours',
+   null, '{"5":{"open":"21:00","close":"02:00"}}', 'Ladies free before midnight', false)
 ) as e(title, description, venue_slug, lat, lng, address, start_date, end_date, hours, price_note, featured)
 left join public.venues v on v.slug = e.venue_slug;
 

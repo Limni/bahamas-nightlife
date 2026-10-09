@@ -35,6 +35,14 @@ function toMinutes(t?: string | null): number | null {
 
 export const hasHours = (h?: WeeklyHours | null): h is WeeklyHours => !!h && Object.keys(h).length > 0;
 
+/** Weekday + minutes since midnight in Bahamas time. */
+export function nassauClock(now: number = Date.now()) {
+  return bahamasParts(new Date(now));
+}
+
+/** 'HH:MM' -> minutes since midnight (null if unset/invalid). */
+export const timeToMinutes = toMinutes;
+
 export function todayIndex(now: number = Date.now()) {
   return bahamasParts(new Date(now)).dow;
 }

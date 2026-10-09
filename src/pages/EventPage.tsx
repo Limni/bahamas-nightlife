@@ -6,7 +6,7 @@ import { ArrowLeft, CalendarHeart, Clock, ExternalLink, Map as MapIcon, MapPin, 
 import { supabase } from '@/lib/supabase';
 import { useDirectory } from '@/lib/directory';
 import { useActivity } from '@/lib/activity';
-import { eventPosition, eventWhen, isEventEnded, isEventLive } from '@/lib/events';
+import { eventPosition, eventWhen, isEventEnded, isEventLive, isRecurring, recurrenceLabel } from '@/lib/events';
 import { DAY_NAMES, dayLabel, hasHours, todayIndex } from '@/lib/hours';
 import { directionsUrl } from '@/lib/geo';
 import { eventIcon, TILE_ATTRIBUTION, TILE_URL } from '@/lib/markers';
@@ -80,7 +80,10 @@ export default function EventPage() {
   const ended = isEventEnded(e, now);
   const heat = venue ? heatOf(venue.id) : null;
   const today = todayIndex(now);
-  const sameDay = fmt(e.start_date, { dateStyle: 'medium' }) === fmt(e.end_date, { dateStyle: 'medium' });
+  const recurring = isRecurring(e);
+  const sameDay = !!e.end_date && fmt(e.start_date, { dateStyle: 'medium' }) === fmt(e.end_date, { dateStyle: 'medium' });
+  // A weekly run's last night: its end instant falls in the small hours after it.
+  const lastNight = e.end_date ? new Date(new Date(e.end_date).getTime() - 43_200_000).toISOString() : null;
 
   const share = async () => {
     const url = window.location.href.split('?')[0];
@@ -198,13 +201,23 @@ export default function EventPage() {
                 <Clock className="w-4 h-4" /> When
               </h3>
               <p className="text-sm font-bold text-white">
-                {sameDay
-                  ? `${fmt(e.start_date, { weekday: 'long', month: 'long', day: 'numeric' })}, ${fmt(e.start_date, { hour: 'numeric', minute: '2-digit' })} – ${fmt(e.end_date, { hour: 'numeric', minute: '2-digit' })}`
-                  : `${fmt(e.start_date, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} → ${fmt(e.end_date, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`}
+                {recurring
+                  ? recurrenceLabel(e.hours, true)
+                  : !e.end_date
+                    ? `From ${fmt(e.start_date, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`
+                    : sameDay
+                      ? `${fmt(e.start_date, { weekday: 'long', month: 'long', day: 'numeric' })}, ${fmt(e.start_date, { hour: 'numeric', minute: '2-digit' })} – ${fmt(e.end_date, { hour: 'numeric', minute: '2-digit' })}`
+                      : `${fmt(e.start_date, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} → ${fmt(e.end_date, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`}
               </p>
+              {recurring && (
+                <p className="mt-0.5 text-xs font-semibold text-night-300">
+                  {new Date(e.start_date).getTime() > now ? 'Starts' : 'Since'} {fmt(e.start_date, { month: 'short', day: 'numeric', year: 'numeric' })}
+                  {lastNight ? ` · last night ${fmt(lastNight, { month: 'short', day: 'numeric', year: 'numeric' })}` : ' · until further notice'}
+                </p>
+              )}
               {hasHours(e.hours) && (
                 <ul className="mt-3 space-y-1">
-                  {[1, 2, 3, 4, 5, 6, 0].map((d) => (
+                  {[1, 2, 3, 4, 5, 6, 0].filter((d) => !recurring || e.hours![String(d)]).map((d) => (
                     <li
                       key={d}
                       className={`flex justify-between gap-3 text-sm px-2 py-1 rounded-lg ${d === today ? 'bg-white/5 font-extrabold text-white' : 'font-semibold text-night-300'}`}

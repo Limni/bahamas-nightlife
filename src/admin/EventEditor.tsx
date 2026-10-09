@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ExternalLink, ImagePlus, Loader2, Save, Trash2, X } from 'lucide-react';
+import { ArrowLeft, CalendarDays, ExternalLink, ImagePlus, Loader2, Repeat, Save, Trash2, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useDirectory } from '@/lib/directory';
 import { deleteMedia, uploadMedia } from '@/lib/images';
-import type { WeeklyHours } from '@/lib/hours';
+import { dayLabel, DAY_NAMES, hasHours, type WeeklyHours } from '@/lib/hours';
+import { recurrenceLabel } from '@/lib/events';
 import type { NightEvent, Venue } from '@/lib/types';
 import { Spinner } from '@/components/ui';
 import { Button, Field, inputClass, Panel, Toggle, useFeedback } from './ui';
@@ -67,6 +68,16 @@ function daysUntil(dow: number) {
   return (dow - today + 7) % 7;
 }
 
+const todayNassau = () => toNassauInput(new Date().toISOString()).slice(0, 10);
+const addDays = (date: string, n: number) => new Date(Date.parse(`${date}T00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+const weekdayOf = (date: string) => new Date(`${date}T12:00Z`).getUTCDay();
+
+// A weekly run is stored as start = 6 AM on its first night and end = 6 AM
+// after its last night, so the small hours of an overnight session still count
+// and the night before the first one doesn't (see isEventInDateRange).
+const DAY_EDGE = 'T06:00';
+const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
+
 interface Form {
   title: string;
   description: string;
@@ -74,14 +85,43 @@ interface Form {
   own_location: boolean;
   location: LatLng | null;
   address: string;
+  /** 'once': start..end. 'weekly': the chosen nights every week, from first_night. */
+  repeat: 'once' | 'weekly';
   start: string;
   end: string;
-  use_hours: boolean;
+  /** Weekly: same time on every chosen night (days + open/close), or per-night `hours`. */
+  custom_times: boolean;
+  days: number[];
+  open: string;
+  close: string;
   hours: WeeklyHours;
+  first_night: string;
+  /** Weekly with no end date: runs until an admin ends or deletes it. */
+  no_end: boolean;
+  last_night: string;
   price_note: string;
   ticket_url: string;
   is_published: boolean;
   is_featured: boolean;
+}
+
+function weeklyFields(e: NightEvent) {
+  const hours = e.hours ?? {};
+  const keys = Object.keys(hours);
+  const first = keys.length ? hours[keys[0]] : null;
+  const uniform = keys.every((k) => hours[k].open === first?.open && hours[k].close === first?.close);
+  // end is 6 AM after the last night; stepping back 12 h lands on that night.
+  const lastNight = e.end_date ? toNassauInput(new Date(Date.parse(e.end_date) - 43_200_000).toISOString()).slice(0, 10) : '';
+  return {
+    custom_times: !uniform,
+    days: keys.map(Number),
+    open: first?.open ?? '22:00',
+    close: first?.close ?? '02:00',
+    hours,
+    first_night: toNassauInput(e.start_date).slice(0, 10),
+    no_end: !e.end_date,
+    last_night: lastNight,
+  };
 }
 
 const toForm = (e: NightEvent): Form => ({
@@ -91,10 +131,10 @@ const toForm = (e: NightEvent): Form => ({
   own_location: e.lat != null && e.lng != null,
   location: e.lat != null && e.lng != null ? { lat: e.lat, lng: e.lng } : null,
   address: e.address ?? '',
+  repeat: hasHours(e.hours) ? 'weekly' : 'once',
   start: toNassauInput(e.start_date),
   end: toNassauInput(e.end_date),
-  use_hours: !!e.hours && Object.keys(e.hours).length > 0,
-  hours: e.hours ?? {},
+  ...weeklyFields(e),
   price_note: e.price_note ?? '',
   ticket_url: e.ticket_url ?? '',
   is_published: e.is_published,
@@ -110,10 +150,17 @@ const blank = (venueId: string, notes = ''): Form => {
     own_location: !venueId,
     location: null,
     address: '',
+    repeat: 'once',
     start: tonight.start,
     end: tonight.end,
-    use_hours: false,
+    custom_times: false,
+    days: [],
+    open: '22:00',
+    close: '02:00',
     hours: {},
+    first_night: todayNassau(),
+    no_end: true,
+    last_night: '',
     price_note: '',
     ticket_url: '',
     is_published: true,
@@ -122,6 +169,18 @@ const blank = (venueId: string, notes = ''): Form => {
 };
 
 const orNull = (s: string) => s.trim() || null;
+
+/** The weekly windows a weekly form describes. */
+function weeklyHours(f: Form): WeeklyHours {
+  if (f.custom_times) return f.hours;
+  return Object.fromEntries(f.days.map((d) => [String(d), { open: f.open, close: f.close }]));
+}
+
+const shortDate = (date: string) =>
+  new Date(`${date}T12:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' });
+
+const chipClass = (on: boolean) =>
+  `px-3 py-1.5 rounded-full text-xs font-extrabold ${on ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700'}`;
 
 /** "/admin/events/new" (optionally ?venue=<id>&notes=<text>, e.g. from an Inbox tip) and "/admin/events/:id". Keyed so switching events starts fresh. */
 export default function EventEditorRoute() {
@@ -198,10 +257,23 @@ function EventEditor() {
 
   const save = async () => {
     if (!form.title.trim()) return toast('Give the event a title', 'error');
-    if (!form.start || !form.end) return toast('Set a start and end time', 'error');
-    const start = fromNassauInput(form.start);
-    const end = fromNassauInput(form.end);
-    if (end < start) return toast('The end is before the start', 'error');
+    let start: string;
+    let end: string | null;
+    let hours: WeeklyHours | null = null;
+    if (form.repeat === 'weekly') {
+      hours = weeklyHours(form);
+      if (!hasHours(hours)) return toast('Pick at least one night of the week', 'error');
+      if (!form.first_night) return toast('Set the first night', 'error');
+      if (!form.no_end && !form.last_night) return toast('Set the last night, or turn on “No end date”', 'error');
+      if (!form.no_end && form.last_night < form.first_night) return toast('The last night is before the first', 'error');
+      start = fromNassauInput(form.first_night + DAY_EDGE);
+      end = form.no_end ? null : fromNassauInput(addDays(form.last_night, 1) + DAY_EDGE);
+    } else {
+      if (!form.start || !form.end) return toast('Set a start and end time', 'error');
+      start = fromNassauInput(form.start);
+      end = fromNassauInput(form.end);
+      if (end < start) return toast('The end is before the start', 'error');
+    }
     if (form.own_location ? !form.location : !form.venue_id) {
       const ok = await confirm({
         title: 'Save without a location?',
@@ -220,7 +292,7 @@ function EventEditor() {
       address: form.own_location ? orNull(form.address) : null,
       start_date: start,
       end_date: end,
-      hours: form.use_hours && Object.keys(form.hours).length ? form.hours : null,
+      hours,
       price_note: orNull(form.price_note),
       ticket_url: orNull(form.ticket_url),
       is_published: form.is_published,
@@ -278,6 +350,34 @@ function EventEditor() {
     navigate('/admin/events', { replace: true });
   };
 
+  const setRepeat = (repeat: Form['repeat']) =>
+    setForm((f) => {
+      if (!f || f.repeat === repeat) return f;
+      // Going weekly from a one-off: carry its night and times over.
+      if (repeat === 'weekly' && !hasHours(weeklyHours(f)) && f.start && f.end) {
+        const night = f.start.slice(0, 10);
+        return { ...f, repeat, custom_times: false, days: [weekdayOf(night)], open: f.start.slice(11, 16), close: f.end.slice(11, 16), first_night: night };
+      }
+      return { ...f, repeat };
+    });
+
+  const toggleCustomTimes = (custom: boolean) =>
+    setForm((f) => {
+      if (!f) return f;
+      if (custom) return { ...f, custom_times: true, hours: weeklyHours(f) };
+      const keys = Object.keys(f.hours);
+      const first = keys.length ? f.hours[keys[0]] : null;
+      return { ...f, custom_times: false, days: keys.map(Number), open: first?.open ?? f.open, close: first?.close ?? f.close };
+    });
+
+  const weeklyPresets: [string, Pick<Form, 'days' | 'open' | 'close'>][] = [
+    ['Every Fri 10 PM–2 AM', { days: [5], open: '22:00', close: '02:00' }],
+    ['Every Sat 10 PM–3 AM', { days: [6], open: '22:00', close: '03:00' }],
+    ['Fri & Sat 10 PM–3 AM', { days: [5, 6], open: '22:00', close: '03:00' }],
+    ['Every Thu 9 PM–1 AM', { days: [4], open: '21:00', close: '01:00' }],
+    ['Every Sun 4–9 PM', { days: [0], open: '16:00', close: '21:00' }],
+  ];
+
   const presets: [string, { start: string; end: string }][] = [
     ['Tonight 10 PM–2 AM', presetNight(0, 22, 2)],
     ['Fri 10 PM–3 AM', presetNight(daysUntil(5), 22, 3)],
@@ -333,33 +433,117 @@ function EventEditor() {
 
       <Panel title="When (Nassau time)">
         <div className="space-y-4">
-          <div className="flex flex-wrap gap-1.5">
-            {presets.map(([label, p]) => (
+          <div className="grid grid-cols-2 gap-1 bg-slate-100 rounded-xl p-1 text-sm font-extrabold">
+            {(
+              [
+                ['once', 'One-off', CalendarDays],
+                ['weekly', 'Every week', Repeat],
+              ] as const
+            ).map(([key, label, Icon]) => (
               <button
-                key={label}
+                key={key}
                 type="button"
-                onClick={() => setForm((f) => (f ? { ...f, start: p.start, end: p.end } : f))}
-                className="px-3 py-1.5 rounded-full bg-slate-100 text-xs font-extrabold text-slate-700 hover:bg-brand-50 hover:text-brand-700"
+                onClick={() => setRepeat(key)}
+                className={`flex items-center justify-center gap-1.5 py-2 rounded-lg ${form.repeat === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
               >
-                {label}
+                <Icon className="w-4 h-4" /> {label}
               </button>
             ))}
           </div>
-          <div className="grid sm:grid-cols-2 gap-4">
-            <Field label="Starts">
-              <input type="datetime-local" className={inputClass} value={form.start} onChange={(e) => set('start', e.target.value)} />
-            </Field>
-            <Field label="Ends">
-              <input type="datetime-local" className={inputClass} value={form.end} onChange={(e) => set('end', e.target.value)} />
-            </Field>
-          </div>
-          <Toggle
-            checked={form.use_hours}
-            onChange={(v) => set('use_hours', v)}
-            label="Recurring weekly hours"
-            hint="For a run across several days (e.g. a festival week): only live during these hours."
-          />
-          {form.use_hours && <HoursEditor value={form.hours} onChange={(v) => set('hours', v)} />}
+
+          {form.repeat === 'once' ? (
+            <>
+              <div className="flex flex-wrap gap-1.5">
+                {presets.map(([label, p]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => setForm((f) => (f ? { ...f, start: p.start, end: p.end } : f))}
+                    className={chipClass(false)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="grid sm:grid-cols-2 gap-4">
+                <Field label="Starts">
+                  <input type="datetime-local" className={inputClass} value={form.start} onChange={(e) => set('start', e.target.value)} />
+                </Field>
+                <Field label="Ends">
+                  <input type="datetime-local" className={inputClass} value={form.end} onChange={(e) => set('end', e.target.value)} />
+                </Field>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-1.5">
+                {weeklyPresets.map(([label, p]) => (
+                  <button key={label} type="button" onClick={() => setForm((f) => (f ? { ...f, custom_times: false, ...p } : f))} className={chipClass(false)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {form.custom_times ? (
+                <HoursEditor value={form.hours} onChange={(v) => set('hours', v)} />
+              ) : (
+                <>
+                  <Field label="Nights">
+                    <div className="flex flex-wrap gap-1.5">
+                      {WEEK_ORDER.map((d) => {
+                        const on = form.days.includes(d);
+                        return (
+                          <button
+                            key={d}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() => set('days', on ? form.days.filter((x) => x !== d) : [...form.days, d])}
+                            className={`${chipClass(on)} min-w-12`}
+                          >
+                            {DAY_NAMES[d].slice(0, 3)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </Field>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label="From">
+                      <input type="time" className={inputClass} value={form.open} onChange={(e) => set('open', e.target.value)} />
+                    </Field>
+                    <Field label="Until" hint="Earlier than “From” = past midnight.">
+                      <input type="time" className={inputClass} value={form.close} onChange={(e) => set('close', e.target.value)} />
+                    </Field>
+                  </div>
+                </>
+              )}
+              <button type="button" onClick={() => toggleCustomTimes(!form.custom_times)} className="text-sm font-extrabold text-brand-700 hover:underline">
+                {form.custom_times ? 'Same time every night' : 'Different times on different nights'}
+              </button>
+              <div className="grid sm:grid-cols-2 gap-4">
+                <Field label="First night">
+                  <input type="date" className={inputClass} value={form.first_night} onChange={(e) => set('first_night', e.target.value)} />
+                </Field>
+                {!form.no_end && (
+                  <Field label="Last night">
+                    <input type="date" className={inputClass} value={form.last_night} min={form.first_night} onChange={(e) => set('last_night', e.target.value)} />
+                  </Field>
+                )}
+              </div>
+              <Toggle
+                checked={form.no_end}
+                onChange={(v) => setForm((f) => (f ? { ...f, no_end: v, last_night: v ? f.last_night : f.last_night || addDays(f.first_night || todayNassau(), 27) } : f))}
+                label="No end date"
+                hint={form.no_end ? 'Repeats every week until you turn this off or delete the event.' : 'Stops after the last night (e.g. a festival or a summer series).'}
+              />
+              {hasHours(weeklyHours(form)) && (
+                <p className="px-3 py-2.5 rounded-xl bg-brand-50 text-sm font-bold text-brand-800">
+                  {recurrenceLabel(weeklyHours(form), true)}
+                  {!form.custom_times && `, ${dayLabel({ open: form.open, close: form.close })}`}
+                  {form.first_night && form.first_night > todayNassau() && ` · from ${shortDate(form.first_night)}`}
+                  {form.no_end ? ' · until further notice' : form.last_night ? ` · last night ${shortDate(form.last_night)}` : ''}
+                </p>
+              )}
+            </>
+          )}
         </div>
       </Panel>
 

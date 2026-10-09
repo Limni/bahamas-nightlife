@@ -45,6 +45,19 @@ drop policy if exists "Admins can see admins" on public.admins;
 create policy "Admins can see admins" on public.admins
   for select using (public.is_admin());
 
+-- A member suspended in /admin/users (auth.users.banned_until). Supabase Auth
+-- refuses their sign-ins and refreshes, but an access token already issued
+-- stays valid until it expires (≤ 1 h), so write policies check this too.
+create or replace function public.is_suspended()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (select 1 from auth.users where id = auth.uid() and banned_until > now());
+$$;
+
 -- -----------------------------------------------------------------------------
 -- updated_at helper
 -- -----------------------------------------------------------------------------
@@ -434,7 +447,13 @@ create policy "Profiles are public" on public.profiles for select using (true);
 
 drop policy if exists "Members edit their own profile" on public.profiles;
 create policy "Members edit their own profile" on public.profiles
-  for update using (id = auth.uid()) with check (id = auth.uid());
+  for update using (id = auth.uid() and not public.is_suspended())
+  with check (id = auth.uid() and not public.is_suspended());
+
+-- Admins can rename members (e.g. an offensive display name) in /admin/users.
+drop policy if exists "Admins edit profiles" on public.profiles;
+create policy "Admins edit profiles" on public.profiles
+  for update using (public.is_admin()) with check (public.is_admin());
 
 -- Create a profile for every new sign-up, using the name given at sign-up.
 create or replace function public.handle_new_user()
@@ -518,13 +537,15 @@ create policy "Members review published spots" on public.reviews
   for insert to authenticated
   with check (
     user_id = auth.uid()
+    and not public.is_suspended()
     and exists (select 1 from public.venues r where r.id = venue_id and r.is_published)
   );
 
+-- Suspended members can still delete (but not edit) their own reviews.
 drop policy if exists "Members edit their own reviews" on public.reviews;
 create policy "Members edit their own reviews" on public.reviews
-  for update using (user_id = auth.uid() or public.is_admin())
-  with check (user_id = auth.uid() or public.is_admin());
+  for update using ((user_id = auth.uid() and not public.is_suspended()) or public.is_admin())
+  with check ((user_id = auth.uid() and not public.is_suspended()) or public.is_admin());
 
 drop policy if exists "Members or admins delete reviews" on public.reviews;
 create policy "Members or admins delete reviews" on public.reviews
@@ -617,7 +638,8 @@ end $$;
 -- =============================================================================
 -- Events — highlighted nights, ported from Island GO's events. An event runs
 -- start_date..end_date, optionally only inside weekly hours (same JSON format
--- as venues.hours, Bahamas time). While it's live it pulses on the map;
+-- as venues.hours, Bahamas time). A weekly event with no end_date repeats
+-- until an admin ends or deletes it. While it's live it pulses on the map;
 -- featured events are pinned first on the Events page and the Explore rail.
 -- =============================================================================
 create table if not exists public.events (
@@ -631,7 +653,7 @@ create table if not exists public.events (
   lng          double precision check (lng between -180 and 180),
   address      text,
   start_date   timestamptz not null,
-  end_date     timestamptz not null,
+  end_date     timestamptz,          -- null = repeats until further notice
   hours        jsonb,
   image_url    text,
   image_path   text,                 -- path inside the venue-media bucket (for deletes)
@@ -643,6 +665,10 @@ create table if not exists public.events (
   updated_at   timestamptz not null default now(),
   constraint events_dates check (end_date >= start_date)
 );
+
+-- Recurring nights ("Ladies Night every Friday, until further notice"): the
+-- weekly hours say which nights, and a null end_date means it never ends.
+alter table public.events alter column end_date drop not null;
 
 create index if not exists events_window_idx on public.events (is_published, end_date);
 create index if not exists events_venue_idx on public.events (venue_id);
@@ -1047,3 +1073,200 @@ end $$;
 --   select cron.schedule('nassau-nights-activity', '* * * * *',
 --                        'select public.activity_housekeeping()');
 -- -----------------------------------------------------------------------------
+
+-- =============================================================================
+-- Member administration (/admin/users)
+--
+-- Accounts live in auth.users, which the API can't read, so admins manage
+-- them through these security-definer functions. Each one checks is_admin()
+-- itself. Emails come back only to admins.
+--
+-- Guard rails: you can't demote, suspend or delete yourself (so at least one
+-- admin always remains), and another admin must be demoted before they can be
+-- suspended or deleted.
+-- =============================================================================
+
+create or replace function public.admin_list_users(
+  p_search text default null,
+  p_filter text default 'all',      -- all | admins | suspended | unconfirmed
+  p_limit  int  default 50,
+  p_offset int  default 0
+)
+returns table (
+  id uuid, email text, display_name text, created_at timestamptz,
+  last_sign_in_at timestamptz, email_confirmed_at timestamptz, banned_until timestamptz,
+  is_admin boolean, review_count int, hidden_review_count int, submission_count int,
+  total_count bigint
+)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+#variable_conflict use_column
+declare
+  q text := nullif(trim(p_search), '');
+begin
+  if not public.is_admin() then
+    raise exception 'Only admins can list members' using errcode = '42501';
+  end if;
+  return query
+  select u.id,
+         u.email::text,
+         coalesce(p.display_name, 'Member'),
+         u.created_at,
+         u.last_sign_in_at,
+         u.email_confirmed_at,
+         case when u.banned_until > now() then u.banned_until end,
+         a.user_id is not null,
+         (select count(*)::int from public.reviews r where r.user_id = u.id),
+         (select count(*)::int from public.reviews r where r.user_id = u.id and r.is_hidden),
+         (select count(*)::int from public.submissions s where s.user_id = u.id),
+         count(*) over ()
+  from auth.users u
+  left join public.profiles p on p.id = u.id
+  left join public.admins a on a.user_id = u.id
+  where (q is null
+         or u.email ilike '%' || q || '%'
+         or p.display_name ilike '%' || q || '%'
+         or u.id::text = q)
+    and case coalesce(p_filter, 'all')
+          when 'admins' then a.user_id is not null
+          when 'suspended' then coalesce(u.banned_until > now(), false)
+          when 'unconfirmed' then u.email_confirmed_at is null
+          else true
+        end
+  order by u.created_at desc
+  limit least(greatest(coalesce(p_limit, 50), 1), 200)
+  offset greatest(coalesce(p_offset, 0), 0);
+end;
+$$;
+
+create or replace function public.admin_set_admin(p_user uuid, p_admin boolean)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Only admins can change admin access' using errcode = '42501';
+  end if;
+  if p_admin then
+    if not exists (select 1 from auth.users where id = p_user) then
+      raise exception 'That account no longer exists';
+    end if;
+    if exists (select 1 from auth.users where id = p_user and banned_until > now()) then
+      raise exception 'Lift the suspension before making them an admin';
+    end if;
+    insert into public.admins (user_id) values (p_user) on conflict do nothing;
+  else
+    if p_user = auth.uid() then
+      raise exception 'You can''t remove your own admin access';
+    end if;
+    delete from public.admins where user_id = p_user;
+  end if;
+end;
+$$;
+
+-- p_until null lifts a suspension. Suspending also ends their sessions, so
+-- they're signed out everywhere once their current access token expires.
+create or replace function public.admin_suspend_user(p_user uuid, p_until timestamptz)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Only admins can suspend members' using errcode = '42501';
+  end if;
+  if p_until is not null then
+    if p_user = auth.uid() then
+      raise exception 'You can''t suspend yourself';
+    end if;
+    if exists (select 1 from public.admins where user_id = p_user) then
+      raise exception 'Remove their admin access first';
+    end if;
+    -- Never 'infinity': Supabase Auth can't parse it. 100 years is "for good".
+    p_until := least(p_until, now() + interval '100 years');
+  end if;
+
+  update auth.users set banned_until = p_until where id = p_user;
+  if not found then
+    raise exception 'That account no longer exists';
+  end if;
+
+  if p_until is not null and p_until > now() and to_regclass('auth.sessions') is not null then
+    execute 'delete from auth.sessions where user_id = $1' using p_user;
+  end if;
+end;
+$$;
+
+-- For when confirmation emails stall (built-in mailer limits) and a member asks.
+create or replace function public.admin_confirm_user(p_user uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Only admins can confirm members' using errcode = '42501';
+  end if;
+  update auth.users set email_confirmed_at = coalesce(email_confirmed_at, now()) where id = p_user;
+  if not found then
+    raise exception 'That account no longer exists';
+  end if;
+end;
+$$;
+
+-- Deletes the account. Their profile and reviews go with it (cascade); their
+-- suggestions stay in the inbox, unlinked. Supabase Auth won't delete a user
+-- who owns Storage objects (their suggestion photos), so ownership is cleared
+-- first and the photos stay with the suggestions.
+create or replace function public.admin_delete_user(p_user uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Only admins can delete members' using errcode = '42501';
+  end if;
+  if p_user = auth.uid() then
+    raise exception 'You can''t delete your own account here';
+  end if;
+  if exists (select 1 from public.admins where user_id = p_user) then
+    raise exception 'Remove their admin access first';
+  end if;
+
+  if to_regclass('storage.objects') is not null then
+    if exists (select 1 from information_schema.columns
+               where table_schema = 'storage' and table_name = 'objects' and column_name = 'owner') then
+      execute 'update storage.objects set owner = null where owner = $1' using p_user;
+    end if;
+    if exists (select 1 from information_schema.columns
+               where table_schema = 'storage' and table_name = 'objects' and column_name = 'owner_id') then
+      execute 'update storage.objects set owner_id = null where owner_id = $1' using p_user::text;
+    end if;
+  end if;
+
+  delete from auth.users where id = p_user;
+  if not found then
+    raise exception 'That account no longer exists';
+  end if;
+end;
+$$;
+
+revoke execute on function public.admin_list_users(text, text, int, int) from public, anon;
+revoke execute on function public.admin_set_admin(uuid, boolean) from public, anon;
+revoke execute on function public.admin_suspend_user(uuid, timestamptz) from public, anon;
+revoke execute on function public.admin_confirm_user(uuid) from public, anon;
+revoke execute on function public.admin_delete_user(uuid) from public, anon;
+grant execute on function public.admin_list_users(text, text, int, int) to authenticated;
+grant execute on function public.admin_set_admin(uuid, boolean) to authenticated;
+grant execute on function public.admin_suspend_user(uuid, timestamptz) to authenticated;
+grant execute on function public.admin_confirm_user(uuid) to authenticated;
+grant execute on function public.admin_delete_user(uuid) to authenticated;

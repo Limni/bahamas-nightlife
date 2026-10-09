@@ -1,19 +1,41 @@
 // Event timing + placement helpers. Timing follows Island GO's events: an
 // event is live while now is inside start..end AND inside today's weekly
 // window (when it has one), all in Bahamas time via lib/hours.
+//
+// Recurring nights ("Ladies Night every Friday") are events with weekly hours
+// and usually no end_date. Sorting and "tonight" use the next session, not
+// start_date, which for a long-running weekly night is months in the past.
 
-import { dayLabel, formatTime, hasHours, openState, todayIndex } from './hours';
+import { DAY_NAMES, dayLabel, formatTime, hasHours, nassauClock, openState, timeToMinutes, todayIndex, type WeeklyHours } from './hours';
 import type { NightEvent, Venue } from './types';
 
 const DAY_MS = 86_400_000;
+const MON_FIRST = [1, 2, 3, 4, 5, 6, 0];
+
+const endTime = (e: Pick<NightEvent, 'end_date'>) => (e.end_date ? new Date(e.end_date).getTime() : Infinity);
+
+/** Weekly hours over a run longer than a day, or with no end: shown as "Every Fri". */
+export function isRecurring(e: Pick<NightEvent, 'start_date' | 'end_date' | 'hours'>) {
+  return hasHours(e.hours) && endTime(e) - new Date(e.start_date).getTime() > DAY_MS;
+}
+
+/** "Every Fri", "Every Fri & Sat", "Every night"; `long` spells the days out. */
+export function recurrenceLabel(hours: WeeklyHours | null | undefined, long = false) {
+  const days = MON_FIRST.filter((d) => hours?.[String(d)]);
+  if (days.length === 7) return 'Every night';
+  const names = days.map((d) => (long ? DAY_NAMES[d] : DAY_NAMES[d].slice(0, 3)));
+  if (names.length === 0) return '';
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`;
+  return `Every ${list}`;
+}
 
 /** The event's whole run has finished. */
 export function isEventEnded(e: Pick<NightEvent, 'end_date'>, now = Date.now()) {
-  return now > new Date(e.end_date).getTime();
+  return now > endTime(e);
 }
 
 export function isEventInDateRange(e: Pick<NightEvent, 'start_date' | 'end_date'>, now = Date.now()) {
-  return now >= new Date(e.start_date).getTime() && now <= new Date(e.end_date).getTime();
+  return now >= new Date(e.start_date).getTime() && now <= endTime(e);
 }
 
 /** Live = within the date range AND within today's hours (true when no hours are set). */
@@ -22,16 +44,36 @@ export function isEventLive(e: Pick<NightEvent, 'start_date' | 'end_date' | 'hou
   return !hasHours(e.hours) || openState(e.hours, now).kind === 'open';
 }
 
+/**
+ * The next session: `at` is when it starts (now, if live) and `opensAt` the
+ * 'HH:MM' it opens for weekly events (labels use it, so a DST change between
+ * now and then can't shift the printed time). Null when no session is left.
+ */
+export function nextSession(e: NightEvent, now = Date.now()): { at: number; opensAt: string | null } | null {
+  const start = new Date(e.start_date).getTime();
+  const end = endTime(e);
+  if (!hasHours(e.hours)) return now <= end ? { at: Math.max(start, now), opensAt: null } : null;
+  const t = Math.max(now, start);
+  if (t > end) return null;
+  const s = openState(e.hours, t);
+  if (s.kind === 'open') return { at: t, opensAt: null };
+  if (s.kind !== 'closed' || s.opensDay === null || !s.opensAt) return null;
+  const { dow, minutes } = nassauClock(t);
+  const open = timeToMinutes(s.opensAt) ?? 0;
+  let days = (s.opensDay - dow + 7) % 7;
+  if (days === 0 && open <= minutes) days = 7;
+  const at = t + (days * 1440 + open - minutes) * 60_000;
+  return at <= end ? { at, opensAt: s.opensAt } : null;
+}
+
+/** When the next session starts (Infinity when none is left); the sort key for upcoming lists. */
+export const eventNextStart = (e: NightEvent, now = Date.now()) => nextSession(e, now)?.at ?? Infinity;
+
 /** Starts (or has a session) within the next `hours` hours — "tonight". */
 export function isEventSoon(e: NightEvent, now = Date.now(), hours = 18) {
   if (isEventEnded(e, now)) return false;
   if (isEventLive(e, now)) return true;
-  const start = new Date(e.start_date).getTime();
-  if (start > now) return start - now <= hours * 3600_000;
-  // A multi-day run that's between sessions: does today's window open later?
-  if (!hasHours(e.hours)) return false;
-  const s = openState(e.hours, now);
-  return s.kind === 'closed' && s.opensDay === todayIndex(now);
+  return eventNextStart(e, now) - now <= hours * 3600_000;
 }
 
 /** Where the event is: its own pin, else its venue's. */
@@ -48,43 +90,63 @@ const nassauDay = (t: number) => fmt(new Date(t), { year: 'numeric', month: '2-d
 
 /**
  * Human "when" for cards: "Live now · until 2 AM", "Tonight · 10 PM",
- * "Sat, Oct 12 · 9 PM", "Oct 10 – Oct 20".
+ * "Sat, Oct 12 · 9 PM", "Oct 10 – Oct 20", and for recurring nights
+ * "Every Fri · 10 PM" / "Tonight · 10 PM · every Fri".
  */
 export function eventWhen(e: NightEvent, now = Date.now()): string {
   const start = new Date(e.start_date);
-  const end = new Date(e.end_date);
-  const multiDay = end.getTime() - start.getTime() > DAY_MS;
+  const end = e.end_date ? new Date(e.end_date) : null;
+  const multiDay = !end || end.getTime() - start.getTime() > DAY_MS;
   const time = (d: Date) => fmt(d, { hour: 'numeric', minute: '2-digit' }).replace(':00', '');
+  const date = (d: Date) => fmt(d, { month: 'short', day: 'numeric' });
 
   if (isEventLive(e, now)) {
     if (hasHours(e.hours)) {
       const s = openState(e.hours, now);
       if (s.kind === 'open') return `Live now · until ${formatTime(s.closesAt)}`;
     }
-    return multiDay ? `Live now · until ${fmt(end, { month: 'short', day: 'numeric' })}` : `Live now · until ${time(end)}`;
+    if (!end) return 'Live now';
+    return multiDay ? `Live now · until ${date(end)}` : `Live now · until ${time(end)}`;
+  }
+
+  const today = nassauDay(now);
+  const tomorrow = nassauDay(now + DAY_MS);
+
+  if (isRecurring(e)) {
+    const pattern = recurrenceLabel(e.hours);
+    // A bounded run says when it stops; an open-ended one which nights it repeats.
+    const tail = end ? `until ${date(new Date(end.getTime() - DAY_MS / 2))}` : pattern.replace('Every', 'every');
+    const next = nextSession(e, now);
+    if (!next) return end ? `${pattern} · ${tail}` : pattern;
+    const at = next.opensAt ? formatTime(next.opensAt) : time(new Date(next.at));
+    if (nassauDay(next.at) === today) return `Tonight · ${at} · ${tail}`;
+    if (nassauDay(next.at) === tomorrow) return `Tomorrow · ${at} · ${tail}`;
+    if (start.getTime() - now > 6 * DAY_MS) return `${pattern} from ${date(start)} · ${at}`;
+    return end ? `${pattern} · ${at} · ${tail}` : `${pattern} · ${at}`;
   }
 
   if (multiDay) {
-    const range = `${fmt(start, { month: 'short', day: 'numeric' })} – ${fmt(end, { month: 'short', day: 'numeric' })}`;
+    if (!end) return start.getTime() <= now ? 'Ongoing' : `From ${date(start)}`;
+    const range = `${date(start)} – ${date(end)}`;
     if (hasHours(e.hours) && start.getTime() <= now) {
-      const today = e.hours[String(todayIndex(now))];
-      return today ? `Tonight ${dayLabel(today)} · runs ${range}` : `Runs ${range}`;
+      const todayHours = e.hours[String(todayIndex(now))];
+      return todayHours ? `Tonight ${dayLabel(todayHours)} · runs ${range}` : `Runs ${range}`;
     }
     return range;
   }
 
   const startT = start.getTime();
-  const today = nassauDay(now);
   if (nassauDay(startT) === today) return `Tonight · ${time(start)}`;
-  if (nassauDay(startT) === nassauDay(now + DAY_MS)) return `Tomorrow · ${time(start)}`;
+  if (nassauDay(startT) === tomorrow) return `Tomorrow · ${time(start)}`;
   if (startT - now < 6 * DAY_MS) return `${fmt(start, { weekday: 'long' })} · ${time(start)}`;
   return `${fmt(start, { weekday: 'short', month: 'short', day: 'numeric' })} · ${time(start)}`;
 }
 
-/** Sort key: live first, then featured, then soonest start. */
+/** Sort key: live first, then featured, then soonest next session. */
 export function compareEvents(now = Date.now()) {
   return (a: NightEvent, b: NightEvent) =>
     Number(isEventLive(b, now)) - Number(isEventLive(a, now)) ||
     Number(b.is_featured) - Number(a.is_featured) ||
+    eventNextStart(a, now) - eventNextStart(b, now) ||
     new Date(a.start_date).getTime() - new Date(b.start_date).getTime();
 }

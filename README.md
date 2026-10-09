@@ -29,7 +29,7 @@ Nightlife for Nassau: bars, clubs, lounges, beach bars and tonight's events, on 
 | `/v/:slug` | Venue page: live level vs. usual, a **popular-times** chart, upcoming events there, hours, drinks menu, photos, reviews |
 | `/community` | Suggest a spot, report changes, or **tip us an event** |
 | `/account` | Member sign-in, reviews and suggestions, plus the **live activity sharing** switch |
-| `/admin` | Admin console: spots, **events**, quick add, inbox, **activity**, reviews, tags, theme |
+| `/admin` | Admin console: spots, **events** (one-off or weekly, with or without an end date), quick add, inbox, **activity**, reviews, **members**, tags, theme |
 
 ## Live activity (how "busy" works)
 

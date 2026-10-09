@@ -6,7 +6,7 @@ Guidance for AI coding agents (and humans) working in this repository. Read this
 
 **Nassau Nights** (https://nassaunights.limniatis.com) is a nightlife guide for Nassau, Bahamas: bars, clubs, lounges, beach bars and events. It is a **clone of Nassau Eats** (`Limni/bahamas-nassaueats`), restyled as a dark neon site, with two features the eats site doesn't have:
 
-- **Highlighted events**, ported from Island GO (`Limni/bahamas-exp`). Events have a date range and optional weekly hours, and live ones pulse on the map.
+- **Highlighted events**, ported from Island GO (`Limni/bahamas-exp`). Events are one-off (a date range) or **weekly/recurring** (weekly hours, optionally with no end date: "Ladies Night every Friday"), and live ones pulse on the map.
 - **Live, GPS-based activity.** Visitors who opt in send anonymous presence pings. The database turns them into "how busy is it now" per venue, compared with that venue's usual for the weekday and hour (8-week average), plus 30-day popularity. It updates in real time over Supabase Realtime.
 
 Everything else is Nassau Eats: directory, map, venue pages with drinks menus/photos/reviews, member accounts, community suggestions and the phone-friendly admin console.
@@ -64,7 +64,8 @@ src/
     directory.tsx          DirectoryProvider (venues, upcoming events, tags, ratings) + LocationProvider
     activity.tsx           ActivityProvider/useActivity: consent, nightly device id, presence pings,
                            venue_activity() fetch + Realtime; heatFor()/HEAT_META levels; usePopularTimes()
-    events.ts              isEventLive/Ended/Soon, eventPosition (own pin or venue's), eventWhen labels
+    events.ts              isEventLive/Ended/Soon, nextSession/eventNextStart, isRecurring/recurrenceLabel,
+                           eventPosition (own pin or venue's), eventWhen labels
     filters.tsx            FiltersProvider + matchesFilters()
     theme.tsx              ThemeProvider/useSiteTheme, initTheme(), ?theme= previews
     themes.ts              THEMES list (ids, names, swatches, hero badge)
@@ -115,6 +116,7 @@ src/
     ReviewsModeration.tsx  hide/unhide/delete member reviews
     TagsManager.tsx        manage category/vibe/area vocabularies
     ThemeSettings.tsx      pick the public site theme
+    UsersAdmin.tsx         member accounts: search, admin access, suspend, confirm, reset, delete
 supabase/
   schema.sql               THE database definition (idempotent, re-runnable)
   seed_demo.sql            optional fictional venues ("demo-*"), events ("Demo ·") and 8 weeks
@@ -139,7 +141,7 @@ README.md, DEPLOY.md       human docs
 | `/events/:id` | EventPage | also loads past events and (for admins) drafts |
 | `/community` | Community | `?kind=new_spot\|update\|closed\|event\|other&venue=<id>&field=menu\|photos\|hours\|phone` pre-fills the form |
 | `/account` | Account | `?mode=signup`, `?next=/path` (in-app paths only; validated by `safeNext`); `#activity` is the sharing switch |
-| `/admin/*` | AdminApp | `/admin`, `/admin/new`, `/admin/v/:id`, `/admin/events`, `/admin/events/new?venue=&notes=`, `/admin/events/:id`, `/admin/inbox`, `/admin/activity`, `/admin/reviews`, `/admin/tags`, `/admin/theme` |
+| `/admin/*` | AdminApp | `/admin`, `/admin/new`, `/admin/v/:id`, `/admin/events`, `/admin/events/new?venue=&notes=`, `/admin/events/:id`, `/admin/inbox`, `/admin/activity`, `/admin/reviews`, `/admin/users`, `/admin/tags`, `/admin/theme` |
 | `*` | → `/` | |
 
 Public pages render inside `<Layout/>` (5 tabs: Explore, Map, Events, Community, Account). `/admin` does not; it has its own light shell. The admin console is reachable **only by URL**, except an "Admin console" button on `/account` for admins.
@@ -188,7 +190,7 @@ Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > Dir
 | `submissions` | community suggestions | `kind 'new_spot'\|'update'\|'closed'\|'event'\|'other'`, `venue_id`, `venue_name`, `fields text[]`, `message`, `contact_name`, `contact_email`, `credit_ok`, `photo_paths text[]` (≤6), `status 'new'\|'reviewing'\|'done'\|'dismissed'`, `admin_note` (private), `resolved_at` (trigger-set), `user_id` (default `auth.uid()`, null for anonymous) |
 | `profiles` | public member profile | `id` → `auth.users`, `display_name` (1–40 chars). Created by the `on_auth_user_created` trigger from sign-up metadata `display_name`. Existing users are backfilled |
 | `site_settings` | one row (`id = true`) of site-wide settings | `theme` (theme id, default `'neon'`; format-checked only, so new themes need no migration), `updated_at`. In the Realtime publication |
-| `events` | highlighted nights | `title`, `description`, `venue_id` (nullable, `on delete set null`), own `lat`/`lng`/`address` (else the venue's pin is used), `start_date`, `end_date` (check end ≥ start), `hours jsonb` (optional weekly windows), `image_url`/`image_path`, `price_note ≤80`, `ticket_url`, `is_published`, `is_featured`, timestamps. In Realtime |
+| `events` | highlighted nights | `title`, `description`, `venue_id` (nullable, `on delete set null`), own `lat`/`lng`/`address` (else the venue's pin is used), `start_date`, `end_date` (check end ≥ start; **null = repeats until further notice**), `hours jsonb` (weekly windows; set = a weekly event), `image_url`/`image_path`, `price_note ≤80`, `ticket_url`, `is_published`, `is_featured`, timestamps. In Realtime |
 | `presence` | **one row per device** currently at a venue | `device_id` PK, `venue_id`, `arrived_at`, `last_seen`, `counted_hour`. **No RLS policies: nobody can read it**; only the security-definer functions touch it. Never stores coordinates |
 | `venue_hourly` | hourly tallies | `(venue_id, hour_start)` PK, `visitors` (distinct phones that hour), `arrivals` (visits that started). Admin read only. Trimmed after 180 days |
 | `venue_live` | current count per venue | `live_count` (already floored: < 2 → 0), `updated_at`. Public read, **in Realtime**; written only when the value changes |
@@ -205,12 +207,12 @@ Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > Dir
 | `tags` | everyone | admins |
 | `site_settings` | everyone | admins update (no insert/delete; the row is seeded) |
 | `submissions` | admins | **anyone can insert**, but only as `status='new'` with no `admin_note`/`resolved_at` and `user_id` null or self; admins update/delete |
-| `profiles` | everyone (only `display_name` exists) | the owner updates their own |
+| `profiles` | everyone (only `display_name` exists) | the owner updates their own (not while suspended); admins update any |
 | `events` | published for anyone; everything for admins | admins only |
 | `presence` | nobody | only `report_presence()` / housekeeping (security definer) |
 | `venue_live`, `venue_typical`, `venue_stats` | everyone (aggregates only) | only the activity functions |
 | `venue_hourly` | admins | only the activity functions |
-| `reviews` | non-hidden for everyone; own (even hidden) for the author; all for admins | members insert their own on **published** spots; authors and admins update/delete |
+| `reviews` | non-hidden for everyone; own (even hidden) for the author; all for admins | members insert their own on **published** spots (not while suspended); authors (not while suspended) and admins update; authors and admins delete |
 
 Only admins may change `reviews.is_hidden`. The `reviews_guard` trigger forces `false` on member inserts and raises an error if a non-admin changes it.
 
@@ -220,7 +222,13 @@ Only admins may change `reviews.is_hidden`. The `reviews_guard` trigger forces `
 - `recent_contributions(p_limit)` (security definer) is the public "community wins" feed: first name only, opted-in (`credit_ok`), `status='done'`.
 - `contribution_count()` returns the number of applied suggestions.
 - `my_submissions()` returns the signed-in member's own suggestions **without `admin_note`**. Execute is revoked from `public` and `anon`.
-- `is_admin()`
+- `is_admin()`; `is_suspended()` (the caller's `auth.users.banned_until` is in the future; used by the review/profile write policies, because an already-issued access token outlives a ban by up to an hour)
+- **Member admin** (security definer, each checks `is_admin()`; execute revoked from `public`/`anon`):
+  - `admin_list_users(p_search, p_filter all|admins|suspended|unconfirmed, p_limit ≤200, p_offset)` → `auth.users` + profile name, admin flag, review/hidden/suggestion counts, `total_count`. The only place emails are returned.
+  - `admin_set_admin(p_user, p_admin)`: can't demote yourself (so an admin always remains) or promote a suspended account.
+  - `admin_suspend_user(p_user, p_until)`: sets `banned_until` (capped at 100 years, never `infinity`, which Auth can't parse) and deletes their `auth.sessions`; null lifts it. Not yourself, not an admin.
+  - `admin_confirm_user(p_user)`: sets `email_confirmed_at` when the confirmation email never arrived.
+  - `admin_delete_user(p_user)`: clears their `storage.objects` ownership (Auth refuses to delete users who own objects; the suggestion photos stay), then deletes from `auth.users`. Profile and reviews cascade; suggestions stay, unlinked. Not yourself, not an admin.
 - **Activity** (all security definer):
   - `report_presence(p_device uuid, p_lat, p_lng, p_accuracy)` → venue id or null. Granted to anon/authenticated. Rate-limited to one ping per device per 45 s. Accuracy ≤ 100 m: nearest published venue whose `radius_m` (+ ≤ 30 m GPS slack) contains the fix (bounding-box prefilter). Accuracy > 100 m: keeps the device at its current venue if the fix still covers it, else changes nothing. Not at a venue → the device's row is deleted. A visit counts after **DWELL = 4 min**; it stops counting **STALE = 15 min** after the last ping; each counted visit adds 1 visitor per hour (and 1 arrival per visit) to `venue_hourly`. Runs `activity_housekeeping()` on ~2% of pings.
   - `venue_activity()` → `venue_id, live_count, typical_now, peak_avg, visits_30d` for published venues with any activity. Lazily rebuilds averages (`activity_refresh_stats()`) at most hourly under an advisory lock. Live counts under 2 are reported as 0.
@@ -260,7 +268,8 @@ Ported from Island GO's map, on a dark basemap:
 
 ### Events (`/events`, `/events/:id`)
 - List grouped Live / Tonight / This week / Coming up, with range chips (Everything, Tonight, Next 7 days, Featured). Live cards get `.neon-edge` and a LIVE tag.
-- Detail: flyer hero, when (Nassau time; weekly schedule when set), price, tickets link, host venue card with its live level, directions, mini map, "On map" (`/map?event=`).
+- **Recurring nights** (`isRecurring`: weekly hours and a run longer than a day, or no end) are labelled "Every Fri · 10 PM", "Tonight · 10 PM · every Fri" or "… · until Nov 20". Sorting, "tonight" and "this week" use the **next session** (`nextSession` / `eventNextStart`), never `start_date`, which for a long-running weekly night is months old. The directory loads events with `end_date` null or in the future.
+- Detail: flyer hero, when (Nassau time; weekly schedule when set, recurring ones as "Every Friday" with since/until and only the nights it runs), price, tickets link, host venue card with its live level, directions, mini map, "On map" (`/map?event=`).
 
 ### Live activity sharing (`components/ActivityConsent.tsx`)
 - `ActivityConsentCard` asks once, when location is on and consent is unset (not on `/account`). Nothing is sent until "Count me in".
@@ -285,8 +294,8 @@ Ported from Island GO's map, on a dark basemap:
 - Signed in: avatar initial, editable display name, email (shown privately), Admin console link (admins), Sign out, **My reviews**, and **My suggestions** with status (Received / In progress / Applied / Not applied).
 
 ### Admin console (`/admin`)
-- **Login gate:** Supabase email + password. Non-admins see SQL to grant access. The console is phone-first and light (`colorScheme: light`): a 5-tab bottom bar (Spots, Events, Quick add, Inbox, Activity); Reviews / Tags / Theme are icons in the phone header.
-- **Events:** list (Upcoming / Live now / Drafts / Past, with "No pin" flags) and editor: title, description, price note, ticket link; start/end in **Nassau time** with presets (Tonight 10 PM–2 AM, Fri/Sat 10 PM–3 AM, Sun 4–9 PM); optional weekly hours; host venue (drafts included) and/or its own location; flyer upload (after the first save, to `events/<id>/`); Published / Featured; delete removes the flyer file. The venue editor links to "New event" with the venue preset, and an Inbox "Event tip" becomes **Create event** (`?venue=&notes=`).
+- **Login gate:** Supabase email + password. Non-admins see SQL to grant access. The console is phone-first and light (`colorScheme: light`): a 5-tab bottom bar (Spots, Events, Quick add, Inbox, Activity); Reviews / Members / Tags / Theme are icons in the phone header.
+- **Events:** list (Upcoming / Live now / Drafts / Past, with "No pin" and "Weekly" flags) and editor: title, description, price note, ticket link; **One-off** (start/end in **Nassau time** with presets: Tonight 10 PM–2 AM, Fri/Sat 10 PM–3 AM, Sun 4–9 PM) or **Every week** (night chips + one time window, or different times per night via `HoursEditor`; weekly presets; first night; **No end date** on by default, else a last night). A weekly run is stored as `start_date` = 6 AM on the first night and `end_date` = 6 AM after the last night (null with no end), so overnight sessions count and the night before doesn't; host venue (drafts included) and/or its own location; flyer upload (after the first save, to `events/<id>/`); Published / Featured; delete removes the flyer file. The venue editor links to "New event" with the venue preset, and an Inbox "Event tip" becomes **Create event** (`?venue=&notes=`).
 - **Activity:** phones counted now, venues buzzing, 30-day visits, a 24-hour visitors-per-hour chart (`venue_hourly`), and a per-venue table (level, live, usual now, 30-day visits, radius).
 - **Spots:** search; All / Live / Drafts / Needs info views. "Gap" badges show a missing pin, hours, photos or menu.
 - **Quick add**, built for the field:
@@ -309,6 +318,7 @@ Ported from Island GO's map, on a dark basemap:
   - "Create draft" for new-spot suggestions, "Create event" for event tips, and a private note per suggestion.
   - Marking a suggestion Done credits the sender's first name publicly if they opted in.
 - **Reviews:** Latest / 1–2 stars / Hidden. Hide (stops it counting; the author still sees it) or Delete.
+- **Members** (`/admin/users`, a header icon on phones): server-side search by name/email/id, All / Admins / Suspended / Unconfirmed, 50 at a time. Expanding a member shows joined / last sign-in / confirmation, rename (display name), Make/Remove admin, Confirm email, **Send password reset** (`resetPasswordForEmail`, back to `/account`), Suspend for 1 / 7 / 30 days or indefinitely (signs them out; they can't sign in, review or rename), Lift suspension, Delete account, plus their reviews (hide/unhide) and suggestions. Your own row has no account actions; admins must be demoted before they can be suspended or deleted. Creating accounts or setting passwords needs the service-role key, so it isn't offered.
 - **Tags:** add, reorder and remove the category / vibe / area options, with usage counts. Removing a tag doesn't strip it from existing spots.
 - **Theme:** cards for each site theme with a mini preview, **Preview** (opens `/?theme=<id>` in a new tab) and **Make live**, which updates `site_settings.theme` for every visitor.
 - Admin UI uses `useFeedback()` toasts and confirms. **Never use `window.alert` / `window.confirm`.**

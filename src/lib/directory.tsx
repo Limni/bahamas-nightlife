@@ -66,7 +66,8 @@ export function DirectoryProvider({ children }: { children: ReactNode }) {
         .from('events')
         .select('*')
         .eq('is_published', true)
-        .gte('end_date', new Date().toISOString())
+        // A null end_date is a recurring night with no end.
+        .or(`end_date.is.null,end_date.gte.${new Date().toISOString()}`)
         .order('start_date')
         .limit(300),
     ]);
