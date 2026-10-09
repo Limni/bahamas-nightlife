@@ -11,7 +11,7 @@ Guidance for AI coding agents (and humans) working in this repository. Read this
 
 Everything else is Nassau Eats: directory, map, venue pages with drinks menus/photos/reviews, member accounts, community suggestions and the phone-friendly admin console.
 
-It is a static React SPA with **no custom backend**. All data, auth and file storage go through **its own Supabase project** (not Nassau Eats'), protected by Postgres row-level security (RLS). It is deployed as an nginx Docker container on the same VM as Island GO (port 5050) and Nassau Eats (5060), on port **5110**.
+It is a static React SPA with **no custom backend** (the one exception is a Supabase Edge Function, `invite-member`, for member invitations). All data, auth and file storage go through **its own Supabase project** (not Nassau Eats'), protected by Postgres row-level security (RLS). It is deployed as an nginx Docker container on the same VM as Island GO (port 5050) and Nassau Eats (5060), on port **5110**.
 
 - Repo: `https://github.com/Limni/bahamas-nightlife` (branch `main`)
 - Supabase project: a new one per `README.md` setup (fill `.env.local`; none is committed).
@@ -121,6 +121,8 @@ supabase/
   schema.sql               THE database definition (idempotent, re-runnable)
   seed_demo.sql            optional fictional venues ("demo-*"), events ("Demo ·") and 8 weeks
                            of crowd history + a live crowd
+  functions/invite-member/ Edge Function (Deno): admin-only wrapper around auth.admin.inviteUserByEmail
+  templates/invite.html    the styled "Invite user" email (pasted into the dashboard)
 scripts/
   seed-google.ts           Google Places importer (Node, service-role key)
 deploy/                    host nginx vhost, HTTPS installer, vm-setup.sh (no-clone installer)
@@ -165,7 +167,7 @@ Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > Dir
   - `heatOf(id)` → `{ level: quiet|chill|lively|packed, label, color, score, vsUsual, usual }` via `heatFor()`: level = live ÷ max(peak_avg, 6); vs usual = live ÷ typical_now (>1.3 busier, <0.7 quieter). `isBusy(id)` = anyone there now. `buzzScore()` sorts "Buzzing".
   - `usePopularTimes(venueId)` reads `venue_typical` into a 7×24 grid.
 - **`FiltersProvider`** holds `{ q, categories, vibes, areas, prices, openNow, busyNow }`, persisted in `sessionStorage` (`filters:v1`) and shared by Explore and Map. `matchesFilters` uses **OR within a group and AND across groups**. Search is accent-insensitive and needs every term to match name, description, area, address, categories or vibes. `busyNow` needs the activity predicate: `matchesFilters(r, f, now, isBusy)`.
-- **`AuthProvider`** exposes `session`, `profile`, `isAdmin` (via the `is_admin()` RPC), `loading`, `recovering` (true after a password-reset link), and `signIn` / `signUp` / `sendReset` / `updatePassword` / `updateName` / `signOut`. The admin console signs in through the same Supabase client, so one session covers both.
+- **`AuthProvider`** exposes `session`, `profile`, `isAdmin` (via the `is_admin()` RPC), `loading`, `recovering` (true after a password-reset link), `invited` (true after an invitation link, until a password is set; `supabase.ts` reads the link type and any `error_code` from the URL hash before the client clears it, as `authLinkType` / `authLinkError`), and `signIn` / `signUp` / `sendReset` / `updatePassword` / `updateName` / `signOut`. The admin console signs in through the same Supabase client, so one session covers both.
 - Venue detail pages fetch their photos, menu items and popular times on demand. They are not part of the directory payload.
 - When `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` are missing (or still `YOUR-PROJECT` placeholders), `supabaseConfigured` is `false`. The client is then created with dummy values, and pages show `<SetupNotice/>` instead of crashing.
 
@@ -229,6 +231,8 @@ Only admins may change `reviews.is_hidden`. The `reviews_guard` trigger forces `
   - `admin_suspend_user(p_user, p_until)`: sets `banned_until` (capped at 100 years, never `infinity`, which Auth can't parse) and deletes their `auth.sessions`; null lifts it. Not yourself, not an admin.
   - `admin_confirm_user(p_user)`: sets `email_confirmed_at` when the confirmation email never arrived.
   - `admin_delete_user(p_user)`: clears their `storage.objects` ownership (Auth refuses to delete users who own objects; the suggestion photos stay), then deletes from `auth.users`. Profile and reviews cascade; suggestions stay, unlinked. Not yourself, not an admin.
+  - `admin_list_users` also returns `invited_at` and takes `p_filter = 'invited'` (invited, not yet accepted). Its result columns changed once, so `schema.sql` drops it before creating it.
+- **Edge Function `invite-member`** (`supabase/functions/invite-member/index.ts`, deployed by the owner; "Verify JWT" on). Body `{ email, display_name?, make_admin?, redirect_to? }`. It checks `is_admin()` **with the caller's token**, then uses the service-role key (only ever inside the function) for `auth.admin.inviteUserByEmail`, with user metadata `display_name` (→ the profile via `handle_new_user`) and `invited_by` (the inviter's display name, for the email). `make_admin` also inserts into `admins`. 403 non-admin, 400 bad email, 409 already registered; re-inviting someone who hasn't accepted re-sends. Supabase sends the **Invite user** template; `supabase/templates/invite.html` is the styled version (inline styles + tables, Go template variables `.ConfirmationURL`, `.Email`, `.SiteURL`, `.Data.display_name`, `.Data.invited_by`). The repo can't push it to the dashboard; if you change it, say the owner must paste it again.
 - **Activity** (all security definer):
   - `report_presence(p_device uuid, p_lat, p_lng, p_accuracy)` → venue id or null. Granted to anon/authenticated. Rate-limited to one ping per device per 45 s. Accuracy ≤ 100 m: nearest published venue whose `radius_m` (+ ≤ 30 m GPS slack) contains the fix (bounding-box prefilter). Accuracy > 100 m: keeps the device at its current venue if the fix still covers it, else changes nothing. Not at a venue → the device's row is deleted. A visit counts after **DWELL = 4 min**; it stops counting **STALE = 15 min** after the last ping; each counted visit adds 1 visitor per hour (and 1 arrival per visit) to `venue_hourly`. Runs `activity_housekeeping()` on ~2% of pings.
   - `venue_activity()` → `venue_id, live_count, typical_now, peak_avg, visits_30d` for published venues with any activity. Lazily rebuilds averages (`activity_refresh_stats()`) at most hourly under an advisory lock. Live counts under 2 are reported as 0.
@@ -291,6 +295,7 @@ Ported from Island GO's map, on a dark basemap:
 ### Account (`/account`)
 - Sign in / Create account (display name, 8+ character password) / Forgot password, then a "Choose a new password" screen when `recovering`.
 - With email confirmation on (the Supabase default), sign-up shows "Check your email". Email links redirect to `/account`.
+- Arriving from an **invitation** link: "Welcome to Nassau Nights", with name (pre-filled from the invite) + password, then the signed-in view. An expired or used email link shows a notice above the sign-in form.
 - Signed in: avatar initial, editable display name, email (shown privately), Admin console link (admins), Sign out, **My reviews**, and **My suggestions** with status (Received / In progress / Applied / Not applied).
 
 ### Admin console (`/admin`)
@@ -318,7 +323,7 @@ Ported from Island GO's map, on a dark basemap:
   - "Create draft" for new-spot suggestions, "Create event" for event tips, and a private note per suggestion.
   - Marking a suggestion Done credits the sender's first name publicly if they opted in.
 - **Reviews:** Latest / 1–2 stars / Hidden. Hide (stops it counting; the author still sees it) or Delete.
-- **Members** (`/admin/users`, a header icon on phones): server-side search by name/email/id, All / Admins / Suspended / Unconfirmed, 50 at a time. Expanding a member shows joined / last sign-in / confirmation, rename (display name), Make/Remove admin, Confirm email, **Send password reset** (`resetPasswordForEmail`, back to `/account`), Suspend for 1 / 7 / 30 days or indefinitely (signs them out; they can't sign in, review or rename), Lift suspension, Delete account, plus their reviews (hide/unhide) and suggestions. Your own row has no account actions; admins must be demoted before they can be suspended or deleted. Creating accounts or setting passwords needs the service-role key, so it isn't offered.
+- **Members** (`/admin/users`, a header icon on phones): **Invite** (email, optional name, "Make them an admin too"; calls `invite-member` and says so if the function isn't deployed), server-side search by name/email/id, All / Admins / Suspended / Invited / Unconfirmed, 50 at a time. Pending invites show an **Invited** badge and **Resend invite**. Expanding a member shows joined / last sign-in / confirmation, rename (display name), Make/Remove admin, Confirm email, **Send password reset** (`resetPasswordForEmail`, back to `/account`), Suspend for 1 / 7 / 30 days or indefinitely (signs them out; they can't sign in, review or rename), Lift suspension, Delete account, plus their reviews (hide/unhide) and suggestions. Your own row has no account actions; admins must be demoted before they can be suspended or deleted. Setting someone's password isn't offered (needs the service-role key; send a reset instead).
 - **Tags:** add, reorder and remove the category / vibe / area options, with usage counts. Removing a tag doesn't strip it from existing spots.
 - **Theme:** cards for each site theme with a mini preview, **Preview** (opens `/?theme=<id>` in a new tab) and **Make live**, which updates `site_settings.theme` for every visitor.
 - Admin UI uses `useFeedback()` toasts and confirms. **Never use `window.alert` / `window.confirm`.**
@@ -427,7 +432,9 @@ The full runbook is in **`DEPLOY.md`**. The essentials:
 
 - **Authentication → Sign In / Providers:** allow new sign-ups (required for member accounts). The provider is email + password.
 - **Authentication → URL Configuration:** Site URL is the primary domain; redirect URLs must list every domain the site is served on (`https://nassaunights.com/**`, `https://www.nassaunights.com/**`, `https://nassaunights.limniatis.com/**`) plus `http://localhost:3000/**`, or auth emails fall back to the Site URL.
-- **Authentication → Emails → SMTP:** the built-in mailer is heavily rate-limited, so configure custom SMTP before launch or confirmation emails will stall.
+- **Authentication → Emails → SMTP:** the built-in mailer is heavily rate-limited and only delivers to the project's team members, so configure custom SMTP before launch or confirmation emails and **invitations** won't arrive.
+- **Authentication → Emails → Templates → Invite user:** paste `supabase/templates/invite.html` (subject: `You're invited to Nassau Nights 🌴`).
+- **Edge Functions:** deploy `invite-member` (see DEPLOY.md, "Member invitations").
 - **Admins:** `insert into public.admins (user_id) select id from auth.users where email = '…';`
 
 ## Conventions and gotchas

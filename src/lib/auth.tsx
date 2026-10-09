@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { supabase, supabaseConfigured } from './supabase';
+import { authLinkType, supabase, supabaseConfigured } from './supabase';
 import type { Profile } from './types';
 
 // Visitor accounts (Supabase Auth, email + password). Shared by the public
@@ -14,6 +14,8 @@ interface AuthValue {
   loading: boolean;
   /** Set when the visitor arrived from a password-reset email. */
   recovering: boolean;
+  /** Set when the visitor arrived from an invitation email and still needs a password. */
+  invited: boolean;
   signIn: (email: string, password: string) => Promise<string | null>;
   signUp: (name: string, email: string, password: string) => Promise<{ error: string | null; needsConfirm: boolean }>;
   sendReset: (email: string) => Promise<string | null>;
@@ -38,6 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(supabaseConfigured);
   const [recovering, setRecovering] = useState(false);
+  const [invited, setInvited] = useState(authLinkType === 'invite');
 
   useEffect(() => {
     if (!supabaseConfigured) return;
@@ -86,7 +89,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const updatePassword = useCallback(async (password: string) => {
     const { error } = await supabase.auth.updateUser({ password });
-    if (!error) setRecovering(false);
+    if (!error) {
+      setRecovering(false);
+      setInvited(false);
+    }
     return error ? friendly(error.message) : null;
   }, []);
 
@@ -107,12 +113,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
+    setInvited(false);
     await supabase.auth.signOut();
   }, []);
 
   const value = useMemo(
-    () => ({ session, profile, isAdmin, loading, recovering, signIn, signUp, sendReset, updatePassword, updateName, signOut }),
-    [session, profile, isAdmin, loading, recovering, signIn, signUp, sendReset, updatePassword, updateName, signOut],
+    () => ({ session, profile, isAdmin, loading, recovering, invited, signIn, signUp, sendReset, updatePassword, updateName, signOut }),
+    [session, profile, isAdmin, loading, recovering, invited, signIn, signUp, sendReset, updatePassword, updateName, signOut],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

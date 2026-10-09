@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { CheckCircle2, Clock, KeyRound, Loader2, LogOut, MailCheck, MessageSquarePlus, Pencil, Shield, Star, XCircle } from 'lucide-react';
-import { supabase, supabaseConfigured } from '@/lib/supabase';
+import { AlertTriangle, CheckCircle2, Clock, KeyRound, Loader2, LogOut, MailCheck, MessageSquarePlus, PartyPopper, Pencil, Shield, Star, XCircle } from 'lucide-react';
+import { authLinkError, supabase, supabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
 import { SUBMISSION_KIND_LABELS, type SubmissionKind, type SubmissionStatus } from '@/lib/types';
 import { SetupNotice } from '@/components/SetupNotice';
@@ -149,26 +149,64 @@ function SignedOut() {
   );
 }
 
-function NewPassword() {
-  const { updatePassword } = useAuth();
+/** After a reset link; or, with `welcome`, the first stop after accepting an invitation. */
+function NewPassword({ welcome = false }: { welcome?: boolean }) {
+  const { updatePassword, updateName, profile } = useAuth();
+  const [name, setName] = useState('');
+  const [nameTouched, setNameTouched] = useState(false);
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // The name the admin typed on the invite arrives with the profile.
+  useEffect(() => {
+    if (profile && !nameTouched) setName(profile.display_name === 'Member' ? '' : profile.display_name);
+  }, [profile, nameTouched]);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (welcome && !name.trim()) return setError('Tell us what to call you.');
     if (password.length < 8) return setError('Use at least 8 characters.');
     setBusy(true);
+    if (welcome && name.trim() !== profile?.display_name) {
+      const nameErr = await updateName(name.trim().slice(0, 40));
+      if (nameErr) {
+        setBusy(false);
+        return setError(nameErr);
+      }
+    }
     const err = await updatePassword(password);
     setBusy(false);
     if (err) setError(err);
   };
   return (
-    <AuthCard title="Choose a new password">
+    <AuthCard
+      title={welcome ? 'Welcome to Nassau Nights' : 'Choose a new password'}
+      subtitle={welcome ? 'You’re in. Pick a name and a password to finish setting up your account.' : undefined}
+    >
+      {welcome && (
+        <div className="mb-4 flex items-center gap-3 p-3 rounded-2xl bg-brand-500/10 border border-brand-400/30 text-sm font-semibold text-brand-100">
+          <PartyPopper className="w-5 h-5 text-brand-300 shrink-0" /> Your invitation has been accepted.
+        </div>
+      )}
       <form onSubmit={submit} className="space-y-3">
-        <input className={input} type="password" placeholder="New password (8+ characters)" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" autoFocus />
+        {welcome && (
+          <input
+            className={input}
+            placeholder="Your name (shown on your reviews)"
+            value={name}
+            maxLength={40}
+            onChange={(e) => {
+              setNameTouched(true);
+              setName(e.target.value);
+            }}
+            autoComplete="nickname"
+          />
+        )}
+        <input className={input} type="password" placeholder={welcome ? 'Password (8+ characters)' : 'New password (8+ characters)'} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" autoFocus={!welcome} />
         {error && <p className="text-sm font-bold text-brand-200">{error}</p>}
         <button type="submit" disabled={busy} className={primary}>
-          {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <KeyRound className="w-5 h-5" />} Save password
+          {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <KeyRound className="w-5 h-5" />} {welcome ? 'Finish setting up' : 'Save password'}
         </button>
       </form>
     </AuthCard>
@@ -351,7 +389,7 @@ function SignedIn() {
 }
 
 export default function Account() {
-  const { session, loading, recovering } = useAuth();
+  const { session, loading, recovering, invited } = useAuth();
   if (!supabaseConfigured) return <SetupNotice />;
   if (loading) {
     return (
@@ -361,9 +399,21 @@ export default function Account() {
     );
   }
   if (recovering) return <NewPassword />;
+  if (invited && session) return <NewPassword welcome />;
   if (session) return <SignedIn />;
   return (
     <>
+      {authLinkError && (
+        <div className="w-full max-w-md mx-auto px-4 pt-8 -mb-4">
+          <div className="flex items-start gap-3 p-4 rounded-2xl bg-amber-400/10 border border-amber-400/30 text-sm font-semibold text-amber-100">
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+            <span>
+              That email link has expired or was already used. If it was an invitation, ask for a new one, or use “Forgot your password?” below with the
+              same email.
+            </span>
+          </div>
+        </div>
+      )}
       <SignedOut />
       <div className="w-full max-w-md mx-auto px-4 pb-10">
         <ActivitySharingToggle />

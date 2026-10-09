@@ -1086,16 +1086,19 @@ end $$;
 -- suspended or deleted.
 -- =============================================================================
 
-create or replace function public.admin_list_users(
+-- Dropped first: create or replace can't change a function's result columns
+-- (invited_at was added after the first version).
+drop function if exists public.admin_list_users(text, text, int, int);
+create function public.admin_list_users(
   p_search text default null,
-  p_filter text default 'all',      -- all | admins | suspended | unconfirmed
+  p_filter text default 'all',      -- all | admins | suspended | unconfirmed | invited
   p_limit  int  default 50,
   p_offset int  default 0
 )
 returns table (
   id uuid, email text, display_name text, created_at timestamptz,
   last_sign_in_at timestamptz, email_confirmed_at timestamptz, banned_until timestamptz,
-  is_admin boolean, review_count int, hidden_review_count int, submission_count int,
+  invited_at timestamptz, is_admin boolean, review_count int, hidden_review_count int, submission_count int,
   total_count bigint
 )
 language plpgsql
@@ -1118,6 +1121,7 @@ begin
          u.last_sign_in_at,
          u.email_confirmed_at,
          case when u.banned_until > now() then u.banned_until end,
+         u.invited_at,
          a.user_id is not null,
          (select count(*)::int from public.reviews r where r.user_id = u.id),
          (select count(*)::int from public.reviews r where r.user_id = u.id and r.is_hidden),
@@ -1132,6 +1136,7 @@ begin
          or u.id::text = q)
     and case coalesce(p_filter, 'all')
           when 'admins' then a.user_id is not null
+          when 'invited' then u.invited_at is not null and u.email_confirmed_at is null
           when 'suspended' then coalesce(u.banned_until > now(), false)
           when 'unconfirmed' then u.email_confirmed_at is null
           else true

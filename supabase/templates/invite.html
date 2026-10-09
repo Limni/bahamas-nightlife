@@ -1,0 +1,155 @@
+<!doctype html>
+<!--
+  Nassau Nights — "Invite user" email.
+  Paste into Supabase Dashboard → Authentication → Emails → Templates → Invite user
+  (Message body: Source). Subject: You're invited to Nassau Nights 🌴
+  Variables: .ConfirmationURL (the accept link), .Email, .SiteURL (the dashboard's
+  Site URL, used for the logo), .Data = the metadata the invite-member function sets
+  (display_name, invited_by). Inline styles and tables only: most mail apps drop
+  <style> blocks and flexbox.
+-->
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="supported-color-schemes" content="dark light" />
+  <title>You're invited to Nassau Nights</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&amp;family=Unbounded:wght@700;800&amp;display=swap" rel="stylesheet" />
+</head>
+<body style="margin:0; padding:0; background-color:#0a0714; -webkit-text-size-adjust:100%;">
+  <!-- Inbox preview line -->
+  <div style="display:none; max-height:0; overflow:hidden; mso-hide:all; font-size:1px; line-height:1px; color:#0a0714;">
+    {{ if .Data.invited_by }}{{ .Data.invited_by }} saved you a spot{{ else }}You&rsquo;ve got a spot{{ end }} on Nassau&rsquo;s live nightlife guide. Tap to accept.&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;
+  </div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0a0714" style="background-color:#0a0714; background-image:radial-gradient(circle at 15% 0%, rgba(247,47,176,0.22), transparent 55%), radial-gradient(circle at 90% 100%, rgba(6,182,212,0.18), transparent 50%);">
+    <tr>
+      <td align="center" style="padding:40px 16px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">
+
+          <!-- Logo -->
+          <tr>
+            <td align="center" style="padding-bottom:28px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="padding-right:12px; vertical-align:middle;">
+                    <img src="{{ .SiteURL }}/icons/icon-192.png" width="44" height="44" alt="" style="display:block; width:44px; height:44px; border:0; border-radius:12px;" />
+                  </td>
+                  <td style="vertical-align:middle; font-family:'Unbounded', 'Arial Black', Arial, Helvetica, sans-serif; font-size:22px; font-weight:800; letter-spacing:-0.5px; color:#ffffff;">
+                    Nassau <span style="color:#ff94de; text-shadow:0 0 12px rgba(247,47,176,0.85);">Nights</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Card -->
+          <tr>
+            <td bgcolor="#130e24" style="background-color:#130e24; border:1px solid #2d2449; border-radius:28px; overflow:hidden;">
+              <!-- Neon edge -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td height="4" bgcolor="#f72fb0" style="height:4px; line-height:4px; font-size:4px; background-color:#f72fb0; background-image:linear-gradient(90deg, #f72fb0, #a855f7, #06b6d4); border-radius:28px 28px 0 0;">&nbsp;</td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="padding:36px 36px 8px 36px;">
+                    <p style="margin:0 0 14px 0; font-family:'DM Sans', Arial, Helvetica, sans-serif; font-size:12px; font-weight:700; letter-spacing:2.5px; text-transform:uppercase; color:#67e8f9;">
+                      &#9679;&nbsp; You&rsquo;re invited
+                    </p>
+                    <h1 style="margin:0; font-family:'Unbounded', 'Arial Black', Arial, Helvetica, sans-serif; font-size:30px; line-height:1.2; font-weight:800; letter-spacing:-0.5px; color:#ffffff;">
+                      {{ if .Data.display_name }}{{ .Data.display_name }}, you&rsquo;re on the&nbsp;list.{{ else }}You&rsquo;re on the&nbsp;list.{{ end }}
+                    </h1>
+                    <p style="margin:18px 0 0 0; font-family:'DM Sans', Arial, Helvetica, sans-serif; font-size:16px; line-height:1.65; color:#c9bfdf;">
+                      <strong style="color:#ffffff;">{{ if .Data.invited_by }}{{ .Data.invited_by }}{{ else }}The Nassau Nights team{{ end }}</strong>
+                      invited you to join <strong style="color:#ffffff;">Nassau Nights</strong>, the live guide to Nassau after dark: bars, clubs, beach bars and tonight&rsquo;s events, on a map that shows where it&rsquo;s buzzing right now.
+                    </p>
+                  </td>
+                </tr>
+
+                <!-- Button -->
+                <tr>
+                  <td align="left" style="padding:28px 36px 8px 36px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td align="center" bgcolor="#f72fb0" style="border-radius:16px; background-color:#f72fb0; background-image:linear-gradient(135deg, #f72fb0, #06b6d4); box-shadow:0 0 24px rgba(247,47,176,0.55);">
+                          <a href="{{ .ConfirmationURL }}" target="_blank" style="display:inline-block; padding:16px 34px; font-family:'DM Sans', Arial, Helvetica, sans-serif; font-size:16px; font-weight:700; color:#ffffff; text-decoration:none; border-radius:16px;">
+                            Accept invitation &nbsp;&rarr;
+                          </a>
+                        </td>
+                      </tr>
+                    </table>
+                    <p style="margin:14px 0 0 0; font-family:'DM Sans', Arial, Helvetica, sans-serif; font-size:13px; line-height:1.5; color:#a397c2;">
+                      You&rsquo;ll choose a password, and you&rsquo;re in. The link works once and expires in 24&nbsp;hours.
+                    </p>
+                  </td>
+                </tr>
+
+                <!-- What's inside -->
+                <tr>
+                  <td style="padding:28px 36px 8px 36px;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #2d2449;">
+                      <tr>
+                        <td style="padding-top:24px; font-family:'DM Sans', Arial, Helvetica, sans-serif;">
+                          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                            <tr>
+                              <td width="44" valign="top" style="padding:0 0 18px 0; font-size:22px; line-height:28px;">&#128293;</td>
+                              <td valign="top" style="padding:0 0 18px 0; font-size:15px; line-height:1.5; color:#c9bfdf;">
+                                <strong style="color:#ffffff;">See where it&rsquo;s buzzing.</strong> Live crowd levels on the map, compared with each spot&rsquo;s usual night.
+                              </td>
+                            </tr>
+                            <tr>
+                              <td width="44" valign="top" style="padding:0 0 18px 0; font-size:22px; line-height:28px;">&#127881;</td>
+                              <td valign="top" style="padding:0 0 18px 0; font-size:15px; line-height:1.5; color:#c9bfdf;">
+                                <strong style="color:#ffffff;">Never miss the night.</strong> DJ sets, live bands, ladies nights and beach parties, tonight and every week.
+                              </td>
+                            </tr>
+                            <tr>
+                              <td width="44" valign="top" style="padding:0 0 4px 0; font-size:22px; line-height:28px;">&#11088;</td>
+                              <td valign="top" style="padding:0 0 4px 0; font-size:15px; line-height:1.5; color:#c9bfdf;">
+                                <strong style="color:#ffffff;">Have your say.</strong> Rate and review your spots, and send tips that keep the guide fresh.
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+                <!-- Fallback link -->
+                <tr>
+                  <td style="padding:24px 36px 36px 36px;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td bgcolor="#1d1633" style="background-color:#1d1633; border-radius:14px; padding:14px 16px; font-family:'DM Sans', Arial, Helvetica, sans-serif; font-size:12px; line-height:1.5; color:#a397c2;">
+                          Button not working? Paste this into your browser:<br />
+                          <a href="{{ .ConfirmationURL }}" style="color:#ff94de; word-break:break-all; text-decoration:underline;">{{ .ConfirmationURL }}</a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td align="center" style="padding:28px 24px 0 24px; font-family:'DM Sans', Arial, Helvetica, sans-serif; font-size:12px; line-height:1.6; color:#7a6d9c;">
+              This invitation was sent to {{ .Email }}.<br />
+              Not expecting it? Ignore this email; no account is active until you accept.<br /><br />
+              <a href="{{ .SiteURL }}" style="color:#a397c2; text-decoration:none;">Nassau Nights</a> &middot; Nassau, Bahamas &#127796;
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

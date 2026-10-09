@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Ban, ChevronDown, KeyRound, MailCheck, Search, ShieldCheck, ShieldOff, Trash2, Undo2, Users as UsersIcon } from 'lucide-react';
+import { Ban, ChevronDown, KeyRound, MailCheck, Search, Send, ShieldCheck, ShieldOff, Trash2, Undo2, UserPlus, Users as UsersIcon, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useDirectory } from '@/lib/directory';
 import { SUBMISSION_KIND_LABELS, type SubmissionKind, type SubmissionStatus } from '@/lib/types';
@@ -16,6 +16,7 @@ interface Member {
   last_sign_in_at: string | null;
   email_confirmed_at: string | null;
   banned_until: string | null; // only set while the suspension is in force
+  invited_at: string | null;
   is_admin: boolean;
   review_count: number;
   hidden_review_count: number;
@@ -23,7 +24,7 @@ interface Member {
   total_count: number;
 }
 
-type Filter = 'all' | 'admins' | 'suspended' | 'unconfirmed';
+type Filter = 'all' | 'admins' | 'invited' | 'suspended' | 'unconfirmed';
 const PAGE = 50;
 
 const SUSPEND_FOR: [string, number | null][] = [
@@ -50,12 +51,41 @@ function ago(d: string | null) {
   const hours = Math.round(mins / 60);
   if (hours < 24) return `${hours} h ago`;
   const days = Math.round(hours / 24);
+  if (days === 1) return '1 day ago';
   return days < 60 ? `${days} days ago` : day(d);
 }
 
 // A suspension is stored as a date ~100 years out when it's "for good".
 const suspendedLabel = (until: string) =>
   new Date(until).getFullYear() - new Date().getFullYear() > 50 ? 'Suspended' : `Suspended until ${day(until)}`;
+
+const NOT_DEPLOYED = 'The invite-member function isn’t deployed yet. See DEPLOY.md, “Member invitations”.';
+
+/**
+ * Sends (or re-sends) an invitation through the invite-member Edge Function,
+ * which holds the service-role key. Supabase sends the "Invite user" email.
+ */
+async function sendInvite(body: { email: string; display_name?: string; make_admin?: boolean }) {
+  const { data, error } = await supabase.functions.invoke('invite-member', {
+    body: { ...body, redirect_to: `${window.location.origin}/account` },
+  });
+  if (!error) return { error: null, warning: (data as { warning?: string } | null)?.warning ?? null };
+  const ctx = (error as { context?: unknown }).context;
+  if (ctx instanceof Response) {
+    if (ctx.status === 404) return { error: NOT_DEPLOYED, warning: null };
+    try {
+      const b = await ctx.json();
+      if (b?.error) return { error: String(b.error), warning: null };
+    } catch {
+      /* not JSON */
+    }
+  }
+  // A function that doesn't exist answers without CORS headers, so it shows up as a fetch error.
+  if (error.name === 'FunctionsFetchError') return { error: `Couldn’t reach the invite function. ${NOT_DEPLOYED}`, warning: null };
+  return { error: error.message, warning: null };
+}
+
+const pendingInvite = (m: Member) => !!m.invited_at && !m.email_confirmed_at;
 
 function Badge({ tone, children }: { tone: 'brand' | 'rose' | 'amber' | 'slate'; children: React.ReactNode }) {
   const tones = {
@@ -76,6 +106,7 @@ export default function UsersAdmin({ meId }: { meId: string }) {
   const [rows, setRows] = useState<Member[] | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  const [inviting, setInviting] = useState(false);
   const reqId = useRef(0);
 
   // Debounce the search box; the RPC searches server-side.
@@ -120,12 +151,21 @@ export default function UsersAdmin({ meId }: { meId: string }) {
 
   return (
     <div className="space-y-4 max-w-3xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-black text-slate-900">Members</h1>
-        <p className="text-sm font-semibold text-slate-500">
-          Everyone with an account. Emails are shown only here; the public site shows display names.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-black text-slate-900">Members</h1>
+          <p className="text-sm font-semibold text-slate-500">
+            Everyone with an account. Emails are shown only here; the public site shows display names.
+          </p>
+        </div>
+        {!inviting && (
+          <Button onClick={() => setInviting(true)} className="shrink-0">
+            <UserPlus className="w-4 h-4" /> Invite
+          </Button>
+        )}
       </div>
+
+      {inviting && <InvitePanel onClose={() => setInviting(false)} onSent={reload} />}
 
       <div className="flex flex-col sm:flex-row gap-2">
         <div className="relative flex-1">
@@ -144,6 +184,7 @@ export default function UsersAdmin({ meId }: { meId: string }) {
               ['all', 'All'],
               ['admins', 'Admins'],
               ['suspended', 'Suspended'],
+              ['invited', 'Invited'],
               ['unconfirmed', 'Unconfirmed'],
             ] as [Filter, string][]
           ).map(([key, label]) => (
@@ -215,7 +256,7 @@ function MemberRow({ m, me, open, onToggle, onChanged }: { m: Member; me: boolea
             {me && <Badge tone="slate">You</Badge>}
             {m.is_admin && <Badge tone="brand">Admin</Badge>}
             {m.banned_until && <Badge tone="rose">{suspendedLabel(m.banned_until)}</Badge>}
-            {!m.email_confirmed_at && <Badge tone="amber">Unconfirmed</Badge>}
+            {!m.email_confirmed_at && <Badge tone="amber">{m.invited_at ? 'Invited' : 'Unconfirmed'}</Badge>}
           </span>
           <span className="block text-sm font-semibold text-slate-500 truncate">{m.email ?? 'no email'}</span>
           <span className="block text-xs font-semibold text-slate-400">
@@ -357,6 +398,21 @@ function MemberDetail({ m, me, onChanged }: { m: Member; me: boolean; onChanged:
     toast(error ? error.message : 'Reset email sent', error ? 'error' : 'success');
   };
 
+  const resendInvite = async () => {
+    if (!m.email) return;
+    const ok = await confirm({
+      title: 'Send the invitation again?',
+      body: `A fresh link goes to ${m.email}; the old one stops working.`,
+      confirmLabel: 'Resend',
+    });
+    if (!ok) return;
+    setBusy('invite');
+    const r = await sendInvite({ email: m.email });
+    setBusy(null);
+    toast(r.error ?? 'Invitation sent again', r.error ? 'error' : 'success');
+    if (!r.error) onChanged();
+  };
+
   const remove = async () => {
     const ok = await confirm({
       title: `Delete ${m.display_name}’s account?`,
@@ -391,7 +447,9 @@ function MemberDetail({ m, me, onChanged }: { m: Member; me: boolean; onChanged:
         </div>
         <div>
           <dt className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Email</dt>
-          <dd className="font-bold text-slate-800">{m.email_confirmed_at ? `Confirmed ${day(m.email_confirmed_at)}` : 'Not confirmed'}</dd>
+          <dd className="font-bold text-slate-800">
+            {m.email_confirmed_at ? `Confirmed ${day(m.email_confirmed_at)}` : m.invited_at ? `Invited ${ago(m.invited_at)}, not accepted` : 'Not confirmed'}
+          </dd>
         </div>
         <div className="min-w-0">
           <dt className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">User ID</dt>
@@ -427,7 +485,12 @@ function MemberDetail({ m, me, onChanged }: { m: Member; me: boolean; onChanged:
                 <ShieldCheck className="w-4 h-4" /> Make admin
               </Button>
             )}
-            {!m.email_confirmed_at && (
+            {pendingInvite(m) && m.email && (
+              <Button variant="secondary" loading={busy === 'invite'} onClick={resendInvite}>
+                <Send className="w-4 h-4" /> Resend invite
+              </Button>
+            )}
+            {!m.email_confirmed_at && !pendingInvite(m) && (
               <Button variant="secondary" loading={busy === 'confirm'} onClick={confirmEmail}>
                 <MailCheck className="w-4 h-4" /> Confirm email
               </Button>
@@ -543,5 +606,69 @@ function MemberDetail({ m, me, onChanged }: { m: Member; me: boolean; onChanged:
         )}
       </div>
     </div>
+  );
+}
+
+/** Invite someone by email: Supabase sends the styled "Invite user" template. */
+function InvitePanel({ onClose, onSent }: { onClose: () => void; onSent: () => void }) {
+  const { toast } = useFeedback();
+  const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
+  const [makeAdmin, setMakeAdmin] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    const to = email.trim();
+    const r = await sendInvite({ email: to, display_name: name.trim() || undefined, make_admin: makeAdmin });
+    setBusy(false);
+    if (r.error) return setError(r.error);
+    toast(r.warning ?? `Invitation sent to ${to}`, r.warning ? 'error' : 'success');
+    setEmail('');
+    setName('');
+    setMakeAdmin(false);
+    onSent();
+  };
+
+  return (
+    <form onSubmit={submit} className="bg-white rounded-2xl border border-brand-200 shadow-sm p-4 md:p-5 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 font-extrabold text-slate-900">
+            <Send className="w-4 h-4 text-brand-600" /> Invite someone
+          </h2>
+          <p className="text-sm font-semibold text-slate-500">
+            They get a Nassau Nights email with a link to choose a password. The link expires after 24 hours.
+          </p>
+        </div>
+        <button type="button" onClick={onClose} aria-label="Close" className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <Field label="Email">
+          <input className={inputClass} type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" autoFocus />
+        </Field>
+        <Field label="Name (optional)" hint="Greets them in the email; they can change it.">
+          <input className={inputClass} value={name} maxLength={40} onChange={(e) => setName(e.target.value)} placeholder="e.g. Shanice" />
+        </Field>
+      </div>
+      <label className="flex items-center gap-2.5 text-sm font-bold text-slate-700 cursor-pointer w-fit">
+        <input type="checkbox" checked={makeAdmin} onChange={(e) => setMakeAdmin(e.target.checked)} className="w-4 h-4 accent-brand-600" />
+        Make them an admin too
+      </label>
+      {makeAdmin && (
+        <p className="-mt-2 text-xs font-semibold text-amber-700">They’ll be able to edit everything in this console, including members.</p>
+      )}
+      {error && <p className="text-sm font-bold text-rose-600">{error}</p>}
+      <div className="flex justify-end">
+        <Button type="submit" loading={busy}>
+          <Send className="w-4 h-4" /> Send invitation
+        </Button>
+      </div>
+    </form>
   );
 }
