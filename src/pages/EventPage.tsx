@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { MapContainer, Marker, TileLayer } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { ArrowLeft, CalendarHeart, Clock, ExternalLink, Map as MapIcon, MapPin, Navigation, Share2, Star, Ticket } from 'lucide-react';
+import { ArrowLeft, CalendarHeart, Clock, ExternalLink, Map as MapIcon, MapPin, Maximize2, Navigation, Share2, Star, Ticket } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useDirectory } from '@/lib/directory';
 import { useActivity } from '@/lib/activity';
@@ -14,6 +14,7 @@ import type { NightEvent } from '@/lib/types';
 import { useNow } from '@/lib/useNow';
 import { EventArt, LiveTag } from '@/components/EventCard';
 import { EmptyState, HeatBadge, SafeImg, Spinner } from '@/components/ui';
+import { Lightbox } from '@/components/Lightbox';
 
 const fmt = (iso: string, opts: Intl.DateTimeFormatOptions) =>
   new Intl.DateTimeFormat('en-US', { timeZone: 'America/Nassau', ...opts }).format(new Date(iso));
@@ -30,6 +31,9 @@ export default function EventPage() {
   const [fetched, setFetched] = useState<NightEvent | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [flyerOpen, setFlyerOpen] = useState(false);
+  // A flyer URL that 404s shows nothing rather than a broken image.
+  const [flyerFailed, setFlyerFailed] = useState<string | null>(null);
 
   // The directory only holds upcoming events; past ones (and drafts, for admins) load here.
   useEffect(() => {
@@ -177,6 +181,26 @@ export default function EventPage() {
 
         <div className="grid gap-4 md:grid-cols-5 mt-5">
           <div className="md:col-span-3 space-y-4">
+            {e.image_url && flyerFailed !== e.image_url && (
+              <button
+                onClick={() => setFlyerOpen(true)}
+                className="group relative block w-full bg-night-900 rounded-3xl border border-white/10 p-2 hover:border-brand-400/50 transition-colors"
+                aria-label={`Open the flyer for ${e.title} full screen`}
+              >
+                {/* The whole flyer, uncropped (the hero above crops it to a banner). */}
+                <img
+                  src={e.image_url}
+                  alt={`Flyer for ${e.title}`}
+                  loading="lazy"
+                  decoding="async"
+                  onError={() => setFlyerFailed(e.image_url)}
+                  className="block w-full h-auto max-h-[80vh] object-contain rounded-2xl"
+                />
+                <span className="absolute bottom-4 right-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-night-950/80 backdrop-blur text-xs font-extrabold text-white opacity-90 group-hover:opacity-100">
+                  <Maximize2 className="w-3.5 h-3.5" /> Tap to expand
+                </span>
+              </button>
+            )}
             {e.description && (
               <section className="bg-night-900 rounded-3xl border border-white/10 p-5">
                 <h3 className="text-sm font-extrabold uppercase tracking-widest text-brand-300 mb-3">About</h3>
@@ -262,6 +286,14 @@ export default function EventPage() {
           </div>
         </div>
       </div>
+      {e.image_url && (
+        <Lightbox
+          images={[{ url: e.image_url, caption: e.title }]}
+          index={flyerOpen ? 0 : null}
+          onIndex={() => {}}
+          onClose={() => setFlyerOpen(false)}
+        />
+      )}
     </div>
   );
 }

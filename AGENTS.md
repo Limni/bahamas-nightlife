@@ -284,7 +284,7 @@ Ported from Island GO's map, on a dark basemap:
 ### Events (`/events`, `/events/:id`)
 - List grouped Live / Tonight / This week / Coming up, with range chips (Everything, Tonight, Next 7 days, Featured). Live cards get `.neon-edge` and a LIVE tag.
 - **Recurring nights** (`isRecurring`: weekly hours and a run longer than a day, or no end) are labelled "Every Fri · 10 PM", "Tonight · 10 PM · every Fri" or "… · until Nov 20". Sorting, "tonight" and "this week" use the **next session** (`nextSession` / `eventNextStart`), never `start_date`, which for a long-running weekly night is months old. The directory loads events with `end_date` null or in the future.
-- Detail: flyer hero, when (Nassau time; weekly schedule when set, recurring ones as "Every Friday" with since/until and only the nights it runs), price, tickets link, host venue card with its live level, directions, mini map, "On map" (`/map?event=`).
+- Detail: flyer hero (cropped banner), then, when a flyer was uploaded, the **full flyer** above About (uncropped, `max-h-[80vh]`; tap → `Lightbox`; hidden if the image fails to load), when (Nassau time; weekly schedule when set, recurring ones as "Every Friday" with since/until and only the nights it runs), price, tickets link, host venue card with its live level, directions, mini map, "On map" (`/map?event=`).
 
 ### Live activity sharing (`components/ActivityConsent.tsx`)
 - `ActivityConsentCard` asks once, when location is on and consent is unset (not on `/account`). Nothing is sent until "Count me in".
