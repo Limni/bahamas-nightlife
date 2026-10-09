@@ -6,7 +6,7 @@ import type { Photo, PhotoKind } from '@/lib/types';
 import { useFeedback } from './ui';
 
 /**
- * Upload + manage one venue's photos of one kind (gallery or menu).
+ * Upload + manage one venue's photos of one kind (gallery, drinks menu or food menu).
  * "Take photo" opens the rear camera directly on phones; "Library" allows
  * picking many at once. Photos are compressed in the browser before upload.
  */
@@ -161,7 +161,7 @@ export function PhotoManager({
         </div>
       ) : photos.length === 0 ? (
         <p className="text-sm font-semibold text-slate-400 text-center py-4">
-          No {kind === 'menu' ? 'menu photos' : 'photos'} yet.
+          No {kind === 'gallery' ? 'photos' : 'menu photos'} yet.
         </p>
       ) : (
         <ul className="grid grid-cols-2 sm:grid-cols-3 gap-3">

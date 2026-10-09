@@ -53,7 +53,7 @@ export default function VenuesList() {
     supabase
       .from('venue_photos')
       .select('venue_id')
-      .eq('kind', 'menu')
+      .in('kind', ['menu', 'food_menu'])
       .then(({ data }) => {
         const counts: Record<string, number> = {};
         for (const p of data ?? []) counts[p.venue_id] = (counts[p.venue_id] ?? 0) + 1;

@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { BookOpen, CheckCircle2, Clock, ImagePlus, Inbox as InboxIcon, Mail, Plus, Trash2, XCircle } from 'lucide-react';
+import { CheckCircle2, Clock, ImagePlus, Inbox as InboxIcon, Mail, Martini, Plus, Trash2, UtensilsCrossed, XCircle } from 'lucide-react';
 import { supabase, SUBMISSION_BUCKET } from '@/lib/supabase';
 import { uploadMedia } from '@/lib/images';
 import { SUBMISSION_KIND_LABELS, type PhotoKind, type Submission, type SubmissionStatus } from '@/lib/types';
 import { Spinner } from '@/components/ui';
 import { Lightbox } from '@/components/Lightbox';
 import { Button, useFeedback } from './ui';
+
+const KIND_LABEL: Record<PhotoKind, string> = { gallery: 'gallery', menu: 'drinks menu', food_menu: 'food menu' };
 
 type Row = Submission & { venues: { id: string; name: string; slug: string } | null };
 
@@ -71,7 +73,7 @@ function SubmissionCard({ s, onChanged }: { s: Row; onChanged: () => void }) {
         .insert({ venue_id: s.venue_id, kind, url, storage_path: mediaPath, sort: Date.now() % 1_000_000, caption: null });
       if (rowError) throw rowError;
       setImported((m) => ({ ...m, [path]: kind }));
-      toast(`Added to ${kind === 'menu' ? 'menu photos' : 'gallery'}`);
+      toast(`Added to ${KIND_LABEL[kind]}`);
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
@@ -128,14 +130,17 @@ function SubmissionCard({ s, onChanged }: { s: Row; onChanged: () => void }) {
               </button>
               {s.venue_id &&
                 (imported[path] ? (
-                  <p className="text-[11px] font-extrabold text-emerald-700 mt-1 text-center">Added to {imported[path]}</p>
+                  <p className="text-[11px] font-extrabold text-emerald-700 mt-1 text-center">Added to {KIND_LABEL[imported[path]]}</p>
                 ) : (
-                  <div className="grid grid-cols-2 gap-1 mt-1">
+                  <div className="grid grid-cols-3 gap-1 mt-1">
                     <button type="button" disabled={busy === path} onClick={() => importPhoto(path, 'gallery')} className="flex items-center justify-center py-1 rounded-lg bg-brand-50 text-brand-700 hover:bg-brand-100 disabled:opacity-50" title="Add to gallery">
                       <ImagePlus className="w-4 h-4" />
                     </button>
-                    <button type="button" disabled={busy === path} onClick={() => importPhoto(path, 'menu')} className="flex items-center justify-center py-1 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:opacity-50" title="Add to menu photos">
-                      <BookOpen className="w-4 h-4" />
+                    <button type="button" disabled={busy === path} onClick={() => importPhoto(path, 'menu')} className="flex items-center justify-center py-1 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:opacity-50" title="Add to drinks menu photos">
+                      <Martini className="w-4 h-4" />
+                    </button>
+                    <button type="button" disabled={busy === path} onClick={() => importPhoto(path, 'food_menu')} className="flex items-center justify-center py-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50" title="Add to food menu photos">
+                      <UtensilsCrossed className="w-4 h-4" />
                     </button>
                   </div>
                 ))}

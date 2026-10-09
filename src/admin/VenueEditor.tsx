@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CalendarPlus, ExternalLink, Save, Trash2 } from 'lucide-react';
+import { ArrowLeft, CalendarPlus, ExternalLink, Martini, Save, Trash2, UtensilsCrossed } from 'lucide-react';
 import { supabase, MEDIA_BUCKET } from '@/lib/supabase';
 import { useDirectory } from '@/lib/directory';
-import type { Venue } from '@/lib/types';
+import { MENU_PHOTO_KIND, type MenuKind, type Venue } from '@/lib/types';
 import type { WeeklyHours } from '@/lib/hours';
 import { Spinner } from '@/components/ui';
 import { Button, Field, inputClass, Panel, Toggle, useFeedback } from './ui';
@@ -62,7 +62,7 @@ const orNull = (s: string) => s.trim() || null;
 const SECTIONS = [
   ['basics', 'Basics'],
   ['photos', 'Photos'],
-  ['menu', 'Drinks'],
+  ['menu', 'Menus'],
   ['location', 'Location'],
   ['hours', 'Hours'],
   ['contact', 'Contact'],
@@ -77,6 +77,7 @@ export default function VenueEditor() {
   const [venue, setVenue] = useState<Venue | null>(null);
   const [form, setForm] = useState<Form | null>(null);
   const [saved, setSaved] = useState<Form | null>(null);
+  const [menuTab, setMenuTab] = useState<MenuKind>('drinks');
   const [saving, setSaving] = useState(false);
   const [missing, setMissing] = useState(false);
 
@@ -192,10 +193,13 @@ export default function VenueEditor() {
       danger: true,
     });
     if (!ok) return;
-    const { data: photos } = await supabase.from('venue_photos').select('storage_path').eq('venue_id', venue.id);
+    const [{ data: photos }, { data: items }] = await Promise.all([
+      supabase.from('venue_photos').select('storage_path').eq('venue_id', venue.id),
+      supabase.from('menu_items').select('photo_path').eq('venue_id', venue.id).not('photo_path', 'is', null),
+    ]);
     const { error } = await supabase.from('venues').delete().eq('id', venue.id);
     if (error) return toast(error.message, 'error');
-    const paths = (photos ?? []).map((p) => p.storage_path).filter(Boolean) as string[];
+    const paths = [...(photos ?? []).map((p) => p.storage_path), ...(items ?? []).map((i) => i.photo_path)].filter(Boolean) as string[];
     if (paths.length) await supabase.storage.from(MEDIA_BUCKET).remove(paths);
     refresh();
     toast('Deleted');
@@ -275,15 +279,34 @@ export default function VenueEditor() {
         />
       </Panel>
 
-      <Panel title="Drinks & menu" id="menu">
+      <Panel title="Drinks & food menus" id="menu">
         <div className="space-y-6">
-          <div>
-            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 mb-2">Menu photos</h3>
-            <PhotoManager venueId={venue.id} kind="menu" />
+          <div className="grid grid-cols-2 gap-1 bg-slate-100 rounded-xl p-1 text-sm font-extrabold">
+            {(
+              [
+                ['drinks', 'Drinks', Martini],
+                ['food', 'Food', UtensilsCrossed],
+              ] as const
+            ).map(([key, label, Icon]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setMenuTab(key)}
+                className={`flex items-center justify-center gap-1.5 py-2 rounded-lg ${menuTab === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+              >
+                <Icon className="w-4 h-4" /> {label}
+              </button>
+            ))}
           </div>
           <div>
-            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 mb-2">Menu items (optional, searchable & easier to read)</h3>
-            <MenuEditor venueId={venue.id} />
+            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 mb-2">{menuTab === 'drinks' ? 'Drinks' : 'Food'} menu photos</h3>
+            <PhotoManager key={menuTab} venueId={venue.id} kind={MENU_PHOTO_KIND[menuTab]} />
+          </div>
+          <div>
+            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 mb-2">
+              {menuTab === 'drinks' ? 'Drinks' : 'Food'} items (optional, easier to read; tap the square to add a photo)
+            </h3>
+            <MenuEditor key={menuTab} venueId={venue.id} menu={menuTab} />
           </div>
         </div>
       </Panel>

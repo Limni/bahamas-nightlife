@@ -26,7 +26,7 @@ Nightlife for Nassau: bars, clubs, lounges, beach bars and tonight's events, on 
 | `/` | Explore: neon hero with a live "busy right now" board, Happening tonight, Buzzing right now, Popular this month, venue types, vibes, neighbourhoods, and the full directory (sort by Buzzing, Popular, Top rated, Nearest…) |
 | `/map` | Dark map with category pins. **Heat halos** show live activity, and clusters glow with their busiest venue. **Live events pulse**, upcoming ones sit dimmed. Swipe-up cards for venues and events |
 | `/events`, `/events/:id` | Highlighted events: Live / Tonight / This week / Coming up, with flyer, schedule, venue, map and tickets |
-| `/v/:slug` | Venue page: live level vs. usual, a **popular-times** chart, upcoming events there, hours, drinks menu, photos, reviews |
+| `/v/:slug` | Venue page: live level vs. usual, a **popular-times** chart, upcoming events there, hours, separate **drinks and food menus** (item photos, members ♥ their favourites), photos, reviews |
 | `/community` | Suggest a spot, report changes, or **tip us an event** |
 | `/account` | Member sign-in, reviews and suggestions, plus the **live activity sharing** switch |
 | `/admin` | Admin console: spots, **events** (one-off or weekly, with or without an end date), quick add, inbox, **activity**, reviews, **members** (invite by shareable link, or styled emails via Resend), tags, theme |
@@ -48,7 +48,7 @@ An event has a start and end, optional weekly hours (for multi-day runs like a f
 
 ## Adding spots in the field
 
-Open `/admin` on your phone. **Quick add** grabs your GPS; type the name, tap type, area and price, and shoot **The place** and **Drinks menu** photos, then **Save draft**. Back home, fill in hours, the activity radius, a description and the drinks menu. **Paste a menu** turns lines like `Rum Punch - 14` into items.
+Open `/admin` on your phone. **Quick add** grabs your GPS; type the name, tap type, area and price, and shoot **The place**, **Drinks menu** and **Food menu** photos, then **Save draft**. Back home, fill in hours, the activity radius, a description and the menus (tap an item's square to give it a photo). **Paste a menu** turns lines like `Rum Punch - 14` into items.
 
 ## Importing real spots from Google Maps
 

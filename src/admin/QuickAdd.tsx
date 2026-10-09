@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { BookOpen, Camera, ImagePlus, Loader2, MapPin, X } from 'lucide-react';
+import { Camera, ImagePlus, Loader2, MapPin, Martini, UtensilsCrossed, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { readPhotoGps, uploadMedia } from '@/lib/images';
 import { useDirectory } from '@/lib/directory';
 import type { PhotoKind } from '@/lib/types';
+
+// Tap a queued photo's tag to cycle what it is.
+const NEXT_KIND: Record<PhotoKind, PhotoKind> = { gallery: 'menu', menu: 'food_menu', food_menu: 'gallery' };
+const KIND_TAG: Record<PhotoKind, { label: string; className: string }> = {
+  gallery: { label: 'Gallery', className: 'bg-white/90 text-slate-800' },
+  menu: { label: 'Drinks menu', className: 'bg-amber-400 text-amber-950' },
+  food_menu: { label: 'Food menu', className: 'bg-emerald-400 text-emerald-950' },
+};
 import { Button, Field, inputClass, Panel, useFeedback } from './ui';
 import { LocationField, getDeviceLocation, type LatLng } from './LocationField';
 import { TagPicker } from './TagPicker';
@@ -193,18 +201,18 @@ export default function QuickAdd() {
       </Panel>
 
       <Panel title="3 · Photos">
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <button type="button" onClick={() => pick('gallery', true)} className="flex flex-col items-center justify-center gap-1 py-4 rounded-xl bg-brand-600 text-white font-extrabold hover:bg-brand-700">
             <Camera className="w-6 h-6" /> The place
           </button>
           <button type="button" onClick={() => pick('menu', true)} className="flex flex-col items-center justify-center gap-1 py-4 rounded-xl bg-amber-500 text-white font-extrabold hover:bg-amber-600">
-            <BookOpen className="w-6 h-6" /> Drinks menu
+            <Martini className="w-6 h-6" /> Drinks menu
           </button>
-          <button type="button" onClick={() => pick('gallery', false)} className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-700 hover:bg-slate-50">
-            <ImagePlus className="w-4 h-4" /> From library
+          <button type="button" onClick={() => pick('food_menu', true)} className="flex flex-col items-center justify-center gap-1 py-4 rounded-xl bg-emerald-600 text-white font-extrabold hover:bg-emerald-700">
+            <UtensilsCrossed className="w-6 h-6" /> Food menu
           </button>
-          <button type="button" onClick={() => pick('menu', false)} className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-700 hover:bg-slate-50">
-            <ImagePlus className="w-4 h-4" /> Menu from library
+          <button type="button" onClick={() => pick('gallery', false)} className="col-span-3 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-700 hover:bg-slate-50">
+            <ImagePlus className="w-4 h-4" /> From library (tap a photo’s tag to mark it as a menu)
           </button>
         </div>
         <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
@@ -217,11 +225,11 @@ export default function QuickAdd() {
                 <img src={q.preview} alt="" className="w-full h-full object-cover" />
                 <button
                   type="button"
-                  onClick={() => setQueue((list) => list.map((x, j) => (j === i ? { ...x, kind: x.kind === 'menu' ? 'gallery' : 'menu' } : x)))}
-                  className={`absolute bottom-1 left-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${q.kind === 'menu' ? 'bg-amber-400 text-amber-950' : 'bg-white/90 text-slate-800'}`}
-                  title="Tap to switch between gallery and menu"
+                  onClick={() => setQueue((list) => list.map((x, j) => (j === i ? { ...x, kind: NEXT_KIND[x.kind] } : x)))}
+                  className={`absolute bottom-1 left-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${KIND_TAG[q.kind].className}`}
+                  title="Tap to switch between gallery, drinks menu and food menu"
                 >
-                  {q.kind === 'menu' ? 'Menu' : 'Gallery'}
+                  {KIND_TAG[q.kind].label}
                 </button>
                 <button
                   type="button"

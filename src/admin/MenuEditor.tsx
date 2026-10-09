@@ -1,8 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ClipboardList, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeftRight, ClipboardList, Heart, ImagePlus, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import type { MenuItem } from '@/lib/types';
+import { deleteMedia, uploadMedia } from '@/lib/images';
+import type { MenuItem, MenuKind } from '@/lib/types';
 import { Button, inputClass, useFeedback } from './ui';
+
+const OTHER: Record<MenuKind, MenuKind> = { drinks: 'food', food: 'drinks' };
+const LABEL: Record<MenuKind, string> = { drinks: 'Drinks', food: 'Food' };
+const PASTE_EXAMPLE: Record<MenuKind, string> = {
+  drinks: 'COCKTAILS:\nSky Juice - 12\nRum Punch | 14 | house rum, tropical juices\n\nBEER:\nKalik 7\nSands 7',
+  food: 'BITES:\nConch Fritters - 12\nCracked Conch | 18 | fried, with fries and slaw\n\nPLATES:\nGrilled Snapper 26',
+};
 
 type Draft = { section: string; name: string; price: string; description: string };
 const EMPTY: Draft = { section: '', name: '', price: '', description: '' };
@@ -41,8 +49,12 @@ export function parseMenuText(text: string, defaultSection = 'Menu') {
   return out;
 }
 
-export function MenuEditor({ venueId }: { venueId: string }) {
+/** One venue's drinks or food menu: items (each with an optional photo), added one by one or pasted. */
+export function MenuEditor({ venueId, menu }: { venueId: string; menu: MenuKind }) {
   const { toast, confirm } = useFeedback();
+  const [uploadingId, setUploadingId] = useState<string | null>(null);
+  const photoFor = useRef<MenuItem | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<MenuItem[] | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -51,12 +63,12 @@ export function MenuEditor({ venueId }: { venueId: string }) {
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
-    const { data } = await supabase.from('menu_items').select('*').eq('venue_id', venueId).order('sort').order('name');
+    const { data } = await supabase.from('menu_items').select('*').eq('venue_id', venueId).eq('menu', menu).order('sort').order('name');
     setItems((data as MenuItem[]) ?? []);
   };
   useEffect(() => {
     load();
-  }, [venueId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [venueId, menu]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sections = useMemo(() => [...new Set((items ?? []).map((i) => i.section))], [items]);
   const grouped = useMemo(() => sections.map((s) => [s, (items ?? []).filter((i) => i.section === s)] as const), [sections, items]);
@@ -73,7 +85,7 @@ export function MenuEditor({ venueId }: { venueId: string }) {
     };
     const { error } = editingId
       ? await supabase.from('menu_items').update(row).eq('id', editingId)
-      : await supabase.from('menu_items').insert({ ...row, venue_id: venueId, sort: nextSort() });
+      : await supabase.from('menu_items').insert({ ...row, venue_id: venueId, menu, sort: nextSort() });
     setSaving(false);
     if (error) return toast(error.message, 'error');
     // Keep the section so a run of items in the same section is quick to enter.
@@ -92,7 +104,49 @@ export function MenuEditor({ venueId }: { venueId: string }) {
     if (!ok) return;
     const { error } = await supabase.from('menu_items').delete().eq('id', item.id);
     if (error) return toast(error.message, 'error');
+    await deleteMedia(item.photo_path);
     setItems((list) => list?.filter((i) => i.id !== item.id) ?? null);
+  };
+
+  const move = async (item: MenuItem) => {
+    const { error } = await supabase.from('menu_items').update({ menu: OTHER[menu] }).eq('id', item.id);
+    if (error) return toast(error.message, 'error');
+    toast(`Moved to the ${LABEL[OTHER[menu]].toLowerCase()} menu`);
+    setItems((list) => list?.filter((i) => i.id !== item.id) ?? null);
+  };
+
+  const pickPhoto = (item: MenuItem) => {
+    photoFor.current = item;
+    fileRef.current?.click();
+  };
+
+  const uploadPhoto = async (file: File) => {
+    const item = photoFor.current;
+    if (!item) return;
+    setUploadingId(item.id);
+    try {
+      const { url, path } = await uploadMedia(file, `${venueId}/items`);
+      const { error } = await supabase.from('menu_items').update({ photo_url: url, photo_path: path }).eq('id', item.id);
+      if (error) {
+        await deleteMedia(path);
+        throw error;
+      }
+      await deleteMedia(item.photo_path);
+      setItems((list) => list?.map((i) => (i.id === item.id ? { ...i, photo_url: url, photo_path: path } : i)) ?? null);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Upload failed', 'error');
+    } finally {
+      setUploadingId(null);
+    }
+  };
+
+  const removePhoto = async (item: MenuItem) => {
+    const ok = await confirm({ title: `Remove the photo of “${item.name}”?`, confirmLabel: 'Remove', danger: true });
+    if (!ok) return;
+    const { error } = await supabase.from('menu_items').update({ photo_url: null, photo_path: null }).eq('id', item.id);
+    if (error) return toast(error.message, 'error');
+    await deleteMedia(item.photo_path);
+    setItems((list) => list?.map((i) => (i.id === item.id ? { ...i, photo_url: null, photo_path: null } : i)) ?? null);
   };
 
   const parsed = useMemo(() => parseMenuText(bulkText, draft.section || 'Menu'), [bulkText, draft.section]);
@@ -101,7 +155,7 @@ export function MenuEditor({ venueId }: { venueId: string }) {
     setSaving(true);
     let sort = nextSort();
     const { error } = await supabase.from('menu_items').insert(
-      parsed.map((p) => ({ venue_id: venueId, section: p.section, name: p.name, price: p.price, description: p.description || null, sort: sort++ })),
+      parsed.map((p) => ({ venue_id: venueId, menu, section: p.section, name: p.name, price: p.price, description: p.description || null, sort: sort++ })),
     );
     setSaving(false);
     if (error) return toast(error.message, 'error');
@@ -119,8 +173,8 @@ export function MenuEditor({ venueId }: { venueId: string }) {
           <input className={inputClass} placeholder="Price" inputMode="decimal" value={draft.price} onChange={(e) => setDraft({ ...draft, price: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && save()} />
         </div>
         <div className="grid sm:grid-cols-2 gap-2">
-          <input className={inputClass} placeholder={`Section (${sections[sections.length - 1] ?? 'Menu'})`} list={`sections-${venueId}`} value={draft.section} onChange={(e) => setDraft({ ...draft, section: e.target.value })} />
-          <datalist id={`sections-${venueId}`}>
+          <input className={inputClass} placeholder={`Section (${sections[sections.length - 1] ?? 'Menu'})`} list={`sections-${venueId}-${menu}`} value={draft.section} onChange={(e) => setDraft({ ...draft, section: e.target.value })} />
+          <datalist id={`sections-${venueId}-${menu}`}>
             {sections.map((s) => (
               <option key={s} value={s} />
             ))}
@@ -153,7 +207,7 @@ export function MenuEditor({ venueId }: { venueId: string }) {
             rows={8}
             value={bulkText}
             onChange={(e) => setBulkText(e.target.value)}
-            placeholder={'COCKTAILS:\nSky Juice - 12\nRum Punch | 14 | house rum, tropical juices\n\nBEER:\nKalik 7\nSands 7'}
+            placeholder={PASTE_EXAMPLE[menu]}
           />
           {parsed.length > 0 && (
             <p className="text-xs font-extrabold text-brand-700">
@@ -167,7 +221,7 @@ export function MenuEditor({ venueId }: { venueId: string }) {
       )}
 
       {items === null ? null : items.length === 0 ? (
-        <p className="text-sm font-semibold text-slate-400 text-center py-2">No menu items yet. Menu photos work too — add them above.</p>
+        <p className="text-sm font-semibold text-slate-400 text-center py-2">No {LABEL[menu].toLowerCase()} items yet. Menu photos work too; add them above.</p>
       ) : (
         grouped.map(([section, list]) => (
           <div key={section}>
@@ -175,11 +229,46 @@ export function MenuEditor({ venueId }: { venueId: string }) {
             <ul className="divide-y divide-slate-100 border border-slate-200 rounded-xl bg-white">
               {list.map((item) => (
                 <li key={item.id} className={`flex items-center gap-2 px-3 py-2 ${editingId === item.id ? 'bg-brand-50' : ''}`}>
+                  <div className="relative shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => pickPhoto(item)}
+                      disabled={uploadingId === item.id}
+                      title={item.photo_url ? 'Replace photo' : 'Add a photo'}
+                      className="w-12 h-12 rounded-lg overflow-hidden border border-dashed border-slate-300 bg-slate-50 flex items-center justify-center text-slate-400 hover:border-brand-400 hover:text-brand-600"
+                    >
+                      {uploadingId === item.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : item.photo_url ? (
+                        <img src={item.photo_url} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <ImagePlus className="w-4 h-4" />
+                      )}
+                    </button>
+                    {item.photo_url && uploadingId !== item.id && (
+                      <button
+                        type="button"
+                        onClick={() => removePhoto(item)}
+                        aria-label="Remove photo"
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-slate-900 text-white flex items-center justify-center"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-bold text-slate-900 truncate">{item.name}</p>
                     {item.description && <p className="text-xs text-slate-500 truncate">{item.description}</p>}
                   </div>
+                  {item.like_count > 0 && (
+                    <span className="inline-flex items-center gap-0.5 text-xs font-extrabold text-rose-500" title={`${item.like_count} likes`}>
+                      <Heart className="w-3.5 h-3.5 fill-current" /> {item.like_count}
+                    </span>
+                  )}
                   {item.price != null && <span className="text-sm font-extrabold text-brand-700">${Number(item.price).toFixed(2)}</span>}
+                  <button type="button" onClick={() => move(item)} className="p-1.5 rounded-lg text-slate-400 hover:text-brand-600 hover:bg-brand-50" aria-label={`Move to ${LABEL[OTHER[menu]]}`} title={`Move to the ${LABEL[OTHER[menu]].toLowerCase()} menu`}>
+                    <ArrowLeftRight className="w-4 h-4" />
+                  </button>
                   <button type="button" onClick={() => startEdit(item)} className="p-1.5 rounded-lg text-slate-400 hover:text-brand-600 hover:bg-brand-50" aria-label="Edit">
                     <Pencil className="w-4 h-4" />
                   </button>
@@ -192,6 +281,17 @@ export function MenuEditor({ venueId }: { venueId: string }) {
           </div>
         ))
       )}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) uploadPhoto(f);
+          e.target.value = '';
+        }}
+      />
     </div>
   );
 }

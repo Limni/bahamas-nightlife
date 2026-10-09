@@ -86,6 +86,8 @@ src/
     VenueDrawer.tsx        DraggableSheet (shared map bottom sheet) + VenueDrawer
     EventDrawer.tsx        map sheet for an event pin
     PopularTimes.tsx       per-night usual-crowd bar chart with tonight's live level
+    MenuList.tsx           MenuSections (a drinks or food menu: item photos, hearts, Fan favourite),
+                           useMenuLikes, LikeSignInPrompt
     ActivityConsent.tsx    one-time opt-in card, Account toggle, "You're at X" banner
     Reviews.tsx            ReviewsSection (summary, own review form, list)
     Lightbox.tsx           full-screen photo viewer
@@ -93,7 +95,7 @@ src/
   pages/
     Explore.tsx            "/" landing + directory
     MapPage.tsx            "/map"
-    VenuePage.tsx          "/v/:slug" (tabs: overview, drinks, photos, reviews)
+    VenuePage.tsx          "/v/:slug" (tabs: overview, drinks, food, photos, reviews)
     EventsPage.tsx         "/events"
     EventPage.tsx          "/events/:id"
     Community.tsx          "/community" suggestions form + community wins
@@ -137,7 +139,7 @@ README.md, DEPLOY.md       human docs
 | --- | --- | --- |
 | `/` | Explore | eager-loaded; everything else is `lazy()`. Any public URL takes `?theme=<id>` to preview a theme in that tab (`?theme=off` ends it) |
 | `/map` | MapPage | `?focus=<venue id>` opens that venue's drawer, `?event=<event id>` an event's |
-| `/v/:slug` | VenuePage | `?tab=menu\|photos\|reviews` (the "menu" tab is labelled Drinks) |
+| `/v/:slug` | VenuePage | `?tab=menu\|food\|photos\|reviews` (the "menu" tab is labelled Drinks; Food shows only when there's a food menu) |
 | `/events` | EventsPage | |
 | `/events/:id` | EventPage | also loads past events and (for admins) drafts |
 | `/community` | Community | `?kind=new_spot\|update\|closed\|event\|other&venue=<id>&field=menu\|photos\|hours\|phone` pre-fills the form |
@@ -185,8 +187,9 @@ Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > Dir
 | --- | --- | --- |
 | `admins` | who is an admin | `user_id` → `auth.users`. `public.is_admin()` (security definer) checks `auth.uid()` |
 | `venues` | listings | `slug` (unique, auto-generated from the name by a trigger if empty), `name`, `description`, `categories text[]` (venue types), `vibes text[]`, `area`, `price_level 1–4`, `phone`, `website`, `instagram`, `facebook`, `address`, `lat`, `lng`, `hours jsonb`, `hours_note`, `cover_url`, `is_published`, `is_featured`, `featured_until`, `google_place_id` (unique, set by the importer), **`radius_m` (15–400, default 60: activity geofence)**, `created_at`, `updated_at` (auto via trigger) |
-| `venue_photos` | gallery + menu photos | `kind 'gallery'\|'menu'`, `url`, `storage_path` (for deletes), `caption`, `sort` |
-| `menu_items` | structured menu | `section`, `name`, `description`, `price numeric(10,2)`, `sort` |
+| `venue_photos` | gallery + menu photos | `kind 'gallery'\|'menu'\|'food_menu'` (`menu` = photos of the **drinks** menu, the original kind), `url`, `storage_path` (for deletes), `caption`, `sort` |
+| `menu_items` | structured menus | **`menu 'drinks'\|'food'`** (added later; existing items were sorted once by food-sounding section names), `section`, `name`, `description`, `price numeric(10,2)`, `sort`, `photo_url`/`photo_path` (one optional photo, `<venue_id>/items/…`), **`like_count`** (kept by a security-definer trigger on `menu_item_likes`; re-running the schema recounts) |
+| `menu_item_likes` | likes on menu items | `(item_id, user_id)` PK (one like per member per item), `user_id` default `auth.uid()` → `profiles`, `created_at`. Cascades with the item and the member |
 | `tags` | filter vocabularies | `kind 'category'\|'vibe'\|'area'`, `label`, `sort`; unique `(kind,label)`; seeded with starter values |
 | `submissions` | community suggestions | `kind 'new_spot'\|'update'\|'closed'\|'event'\|'other'`, `venue_id`, `venue_name`, `fields text[]`, `message`, `contact_name`, `contact_email`, `credit_ok`, `photo_paths text[]` (≤6), `status 'new'\|'reviewing'\|'done'\|'dismissed'`, `admin_note` (private), `resolved_at` (trigger-set), `user_id` (default `auth.uid()`, null for anonymous) |
 | `profiles` | public member profile | `id` → `auth.users`, `display_name` (1–40 chars). Created by the `on_auth_user_created` trigger from sign-up metadata `display_name`. Existing users are backfilled |
@@ -213,6 +216,7 @@ Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > Dir
 | `presence` | nobody | only `report_presence()` / housekeeping (security definer) |
 | `venue_live`, `venue_typical`, `venue_stats` | everyone (aggregates only) | only the activity functions |
 | `venue_hourly` | admins | only the activity functions |
+| `menu_item_likes` | own rows only (+ admins); the public sees `menu_items.like_count` | members insert their own on items of **published** spots (not while suspended) and delete their own; admins delete |
 | `reviews` | non-hidden for everyone; own (even hidden) for the author; all for admins | members insert their own on **published** spots (not while suspended); authors (not while suspended) and admins update; authors and admins delete |
 
 Only admins may change `reviews.is_hidden`. The `reviews_guard` trigger forces `false` on member inserts and raises an error if a non-admin changes it.
@@ -267,7 +271,8 @@ Ported from Island GO's map, on a dark basemap:
 ### Venue page (`/v/:slug`)
 - Hero, title card with live `HeatBadge` (+ vs usual), open state, rating, Call / Directions / On map.
 - **Overview:** **Live activity** card (`PopularTimes`: pick a night; bars show the usual crowd from noon to 5 AM, with after-midnight hours taken from the next weekday; tonight's current hour is outlined in the live heat colour), **Upcoming here** events, about, photos, hours, mini map, contact.
-- **Drinks:** menu items by section with leader lines and BSD prices, plus menu photos. **Photos**, **Reviews** as in Nassau Eats.
+- **Drinks** and **Food** (separate menus, `MenuSections`): items by section with leader lines and BSD prices, an item photo (tap → lightbox through that menu's item photos), a **heart** with the like count (optimistic; signed-out taps show a sign-in prompt with `next=`), and a **Fan favourite** badge on the most-liked items (≥ 3 likes, at most a third of the menu and 3), plus that menu's photos. **Photos**, **Reviews** as in Nassau Eats.
+- The overview links to each menu that has content.
 
 ### Events (`/events`, `/events/:id`)
 - List grouped Live / Tonight / This week / Coming up, with range chips (Everything, Tonight, Next 7 days, Featured). Live cards get `.neon-edge` and a LIVE tag.
@@ -305,20 +310,20 @@ Ported from Island GO's map, on a dark basemap:
 - **Quick add**, built for the field:
   - It grabs GPS immediately.
   - Fill in name, area, category, price, phone and notes.
-  - "Place / food" and "Menu page" camera buttons (`capture="environment"`) plus library pickers, with a tap-to-toggle gallery/menu flag per photo.
+  - "The place", "Drinks menu" and "Food menu" camera buttons (`capture="environment"`) plus a library picker; tap a queued photo's tag to cycle gallery → drinks menu → food menu.
   - If GPS isn't available, the location comes from the photo's EXIF data.
   - **Save draft** inserts the venue (unpublished), uploads the photos, sets the first gallery photo as the cover, and opens the editor.
   - `?name=&notes=&from=<submissionId>` pre-fills it from an Inbox suggestion and marks that suggestion "reviewing".
-- **Editor:** sections for Basics, Photos, Drinks & menu, Location (with the **activity radius** slider, 15–300 m), Hours, Events here, Contact and Visibility.
+- **Editor:** sections for Basics, Photos, Drinks & food menus, Location (with the **activity radius** slider, 15–300 m), Hours, Events here, Contact and Visibility.
   - A sticky save bar shows unsaved changes, with a `beforeunload` warning.
   - Publishing saves everything; publishing without a pin asks for confirmation.
   - Featured has an optional end date. The slug is editable, and an empty slug is regenerated.
   - Delete also removes the spot's storage files.
 - **PhotoManager:** camera or library upload with progress, reorder (left/right), inline caption, set as cover, delete (also deletes the storage object). It auto-sets the cover for the first photo and reports EXIF GPS to the editor.
-- **MenuEditor:** add or edit items one at a time, or **Paste a menu**. `parseMenuText` treats each line as an item with a trailing price (`Conch Fritters - 12`, `$12`, `12.50`). `Name | price | description` adds a description. A line ending in `:`, or a short ALL-CAPS line with no digits, starts a section.
+- **MenuEditor** (`menu` prop; the editor's "Drinks & food menus" panel switches between the two, each with its own menu photos): add or edit items one at a time, or **Paste a menu**. Each item has a photo square (tap to add/replace, × to remove; old files are deleted), its like count, and a ⇄ button to move it to the other menu. Deleting an item deletes its photo; deleting a spot deletes item photos too. `parseMenuText` treats each line as an item with a trailing price (`Conch Fritters - 12`, `$12`, `12.50`). `Name | price | description` adds a description. A line ending in `:`, or a short ALL-CAPS line with no digits, starts a section.
 - **LocationField:** tap the map or drag the pin, "I'm here — use my GPS", or paste a Google Maps URL or `lat, lng`. `parseCoordinates` handles `!3d…!4d…`, `@lat,lng` and plain pairs; short `maps.app.goo.gl` links can't be expanded in the browser.
 - **Inbox:** tabs New / In progress / Done / Dismissed.
-  - Signed URLs for photos, plus **one-tap "add to gallery / add to menu"**, which downloads the photo from the private bucket and re-uploads it to the media bucket.
+  - Signed URLs for photos, plus **one-tap "add to gallery / drinks menu / food menu"**, which downloads the photo from the private bucket and re-uploads it to the media bucket.
   - "Create draft" for new-spot suggestions, "Create event" for event tips, and a private note per suggestion.
   - Marking a suggestion Done credits the sender's first name publicly if they opted in.
 - **Reviews:** Latest / 1–2 stars / Hidden. Hide (stops it counting; the author still sees it) or Delete.

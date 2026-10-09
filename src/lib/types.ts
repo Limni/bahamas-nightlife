@@ -29,7 +29,8 @@ export interface Venue {
   updated_at: string;
 }
 
-export type PhotoKind = 'gallery' | 'menu';
+/** 'menu' = photos of the drinks menu (the original kind), 'food_menu' = of the food menu. */
+export type PhotoKind = 'gallery' | 'menu' | 'food_menu';
 
 export interface Photo {
   id: string;
@@ -42,14 +43,25 @@ export interface Photo {
   created_at: string;
 }
 
+export type MenuKind = 'drinks' | 'food';
+
+/** Which venue_photos kind holds the photos of each menu. */
+export const MENU_PHOTO_KIND: Record<MenuKind, PhotoKind> = { drinks: 'menu', food: 'food_menu' };
+
 export interface MenuItem {
   id: string;
   venue_id: string;
+  menu: MenuKind;
   section: string;
   name: string;
   description: string | null;
   price: number | null;
   sort: number;
+  photo_url: string | null;
+  /** Path inside the venue-media bucket (for deletes). */
+  photo_path: string | null;
+  /** Members who like it (kept by a trigger). */
+  like_count: number;
 }
 
 export type TagKind = 'category' | 'vibe' | 'area';

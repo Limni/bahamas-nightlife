@@ -4,31 +4,31 @@ import { MapContainer, Marker, TileLayer } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import {
   ArrowLeft, CalendarHeart, Camera, Clock, ExternalLink, Globe, ImageOff, AtSign, ThumbsUp, Map as MapIcon,
-  MapPin, Martini, MessageSquarePlus, Navigation, Phone, Radio, Share2, Star,
+  MapPin, Martini, MessageSquarePlus, Navigation, Phone, Radio, Share2, Star, UtensilsCrossed,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useDirectory } from '@/lib/directory';
 import { DAY_NAMES, dayLabel, hasHours, todayIndex } from '@/lib/hours';
 import { directionsUrl } from '@/lib/geo';
 import { pinIcon, pinStyleFor, TILE_ATTRIBUTION, TILE_URL } from '@/lib/markers';
-import { hasLocation, isFeatured, type MenuItem, type Photo, type Venue } from '@/lib/types';
+import { hasLocation, isFeatured, type MenuItem, type MenuKind, type Photo, type Venue } from '@/lib/types';
 import { useNow } from '@/lib/useNow';
 import { useActivity } from '@/lib/activity';
 import { compareEvents, isEventEnded } from '@/lib/events';
 import { Lightbox, type LightboxImage } from '@/components/Lightbox';
 import { EmptyState, HeatBadge, OpenBadge, Price, SafeImg, Spinner, Stars } from '@/components/ui';
 import { ReviewsSection } from '@/components/Reviews';
+import { LikeSignInPrompt, MenuSections, useMenuLikes } from '@/components/MenuList';
 import { PopularTimes } from '@/components/PopularTimes';
 import { EventCard } from '@/components/EventCard';
 
-type Tab = 'overview' | 'menu' | 'photos' | 'reviews';
+// 'menu' is the drinks menu (its URL, ?tab=menu, predates the food menu).
+type Tab = 'overview' | 'menu' | 'food' | 'photos' | 'reviews';
 
 const instagramUrl = (v: string) => (v.startsWith('http') ? v : `https://instagram.com/${v.replace(/^@/, '')}`);
 const facebookUrl = (v: string) => (v.startsWith('http') ? v : `https://facebook.com/${v}`);
 const websiteUrl = (v: string) => (v.startsWith('http') ? v : `https://${v}`);
 const prettyUrl = (v: string) => v.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
-const money = (n: number) => `$${n % 1 === 0 ? n.toFixed(0) : n.toFixed(2)}`;
-
 function PhotoGrid({ photos, onOpen }: { photos: Photo[]; onOpen: (i: number) => void }) {
   return (
     <div className="columns-2 md:columns-3 gap-3 [&>*]:mb-3">
@@ -109,15 +109,10 @@ export default function VenuePage() {
 
   const gallery = useMemo(() => photos.filter((p) => p.kind === 'gallery'), [photos]);
   const menuPhotos = useMemo(() => photos.filter((p) => p.kind === 'menu'), [photos]);
-  const sections = useMemo(() => {
-    const map = new Map<string, MenuItem[]>();
-    for (const item of menu) {
-      const key = item.section || 'Menu';
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(item);
-    }
-    return [...map.entries()];
-  }, [menu]);
+  const foodPhotos = useMemo(() => photos.filter((p) => p.kind === 'food_menu'), [photos]);
+  const drinks = useMemo(() => menu.filter((i) => i.menu !== 'food'), [menu]);
+  const food = useMemo(() => menu.filter((i) => i.menu === 'food'), [menu]);
+  const likes = useMenuLikes(menu);
 
   if (!r) {
     if (notFound && !dirLoading) {
@@ -158,10 +153,43 @@ export default function VenuePage() {
   const upcoming = events.filter((e) => e.venue_id === r.id && !isEventEnded(e, now)).sort(compareEvents(now));
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: 'overview', label: 'Overview' },
-    { key: 'menu', label: 'Drinks', count: menu.length + menuPhotos.length || undefined },
+    { key: 'menu', label: 'Drinks', count: drinks.length + menuPhotos.length || undefined },
+    // Food only shows up when there's a food menu (most bars have none).
+    ...(food.length || foodPhotos.length || tab === 'food' ? [{ key: 'food' as Tab, label: 'Food', count: food.length + foodPhotos.length || undefined }] : []),
     { key: 'photos', label: 'Photos', count: gallery.length || undefined },
     { key: 'reviews', label: 'Reviews', count: rating?.rating_count || undefined },
   ];
+
+  const renderMenu = (kind: MenuKind) => {
+    const items = kind === 'food' ? food : drinks;
+    const pics = kind === 'food' ? foodPhotos : menuPhotos;
+    const noun = kind === 'food' ? 'food' : 'drinks';
+    if (loadingDetail) return <div className="flex justify-center py-16"><Spinner /></div>;
+    if (items.length === 0 && pics.length === 0) {
+      return (
+        <EmptyState icon={kind === 'food' ? <UtensilsCrossed className="w-8 h-8" /> : <Martini className="w-8 h-8" />} title={`No ${noun} menu yet`}>
+          Got a photo of their menu?{' '}
+          <Link to={`/community?kind=update&venue=${r.id}&field=menu`} className="font-bold text-brand-300 underline">
+            Send it in
+          </Link>{' '}
+          and we’ll add it.
+        </EmptyState>
+      );
+    }
+    return (
+      <div className="space-y-6">
+        <LikeSignInPrompt likes={likes} what={kind === 'food' ? 'dishes' : 'drinks'} />
+        {items.length > 0 && <MenuSections items={items} likes={likes} idPrefix={kind} onOpenImages={(images, index) => setLightbox({ images, index })} />}
+        {pics.length > 0 && (
+          <div>
+            <h3 className="text-sm font-extrabold uppercase tracking-widest text-brand-300 mb-3">Menu photos</h3>
+            <PhotoGrid photos={pics} onOpen={(i) => openPhotos(pics, i)} />
+          </div>
+        )}
+        <p className="text-xs font-semibold text-night-400">Prices in BSD and may change; check with the venue. Tap ♥ on the ones you love.</p>
+      </div>
+    );
+  };
 
   return (
     <div className="w-full pb-12">
@@ -263,7 +291,7 @@ export default function VenuePage() {
               <button
                 key={t.key}
                 onClick={() => setTab(t.key)}
-                className={`flex-1 sm:flex-none px-5 py-2.5 rounded-xl text-sm font-extrabold transition-colors ${
+                className={`flex-1 sm:flex-none px-2.5 sm:px-5 py-2.5 rounded-xl text-sm font-extrabold transition-colors ${
                   tab === t.key ? 'bg-brand-500 text-white' : 'text-night-200 hover:bg-white/5'
                 }`}
               >
@@ -324,19 +352,31 @@ export default function VenuePage() {
                   </Card>
                 )}
 
-                {(menu.length > 0 || menuPhotos.length > 0) && (
-                  <button
-                    onClick={() => setTab('menu')}
-                    className="w-full flex items-center justify-between gap-3 p-5 rounded-3xl bg-gradient-to-r from-brand-500 to-glow-500 text-white glow-brand hover:brightness-110"
-                  >
-                    <span className="text-left">
-                      <span className="block text-lg font-extrabold">See the drinks menu</span>
-                      <span className="block text-sm font-semibold text-white/85">
-                        {[menu.length && `${menu.length} items`, menuPhotos.length && `${menuPhotos.length} menu photos`].filter(Boolean).join(' · ')}
-                      </span>
-                    </span>
-                    <ExternalLink className="w-6 h-6" />
-                  </button>
+                {(drinks.length + menuPhotos.length > 0 || food.length + foodPhotos.length > 0) && (
+                  <div className={`grid gap-3 ${drinks.length + menuPhotos.length > 0 && food.length + foodPhotos.length > 0 ? 'sm:grid-cols-2' : ''}`}>
+                    {(
+                      [
+                        ['menu', 'See the drinks menu', drinks.length, menuPhotos.length, 'from-brand-500 to-glow-500'],
+                        ['food', 'See the food menu', food.length, foodPhotos.length, 'from-glow-500 to-brand-500'],
+                      ] as const
+                    )
+                      .filter(([, , items, pics]) => items + pics > 0)
+                      .map(([key, label, items, pics, gradient]) => (
+                        <button
+                          key={key}
+                          onClick={() => setTab(key)}
+                          className={`w-full flex items-center justify-between gap-3 p-5 rounded-3xl bg-gradient-to-r ${gradient} text-white glow-brand hover:brightness-110`}
+                        >
+                          <span className="text-left">
+                            <span className="block text-lg font-extrabold">{label}</span>
+                            <span className="block text-sm font-semibold text-white/85">
+                              {[items && `${items} items`, pics && `${pics} menu photos`].filter(Boolean).join(' · ')}
+                            </span>
+                          </span>
+                          <ExternalLink className="w-6 h-6 shrink-0" />
+                        </button>
+                      ))}
+                  </div>
                 )}
               </div>
 
@@ -427,59 +467,7 @@ export default function VenuePage() {
             </div>
           )}
 
-          {tab === 'menu' &&
-            (loadingDetail ? (
-              <div className="flex justify-center py-16"><Spinner /></div>
-            ) : menu.length === 0 && menuPhotos.length === 0 ? (
-              <EmptyState icon={<Martini className="w-8 h-8" />} title="No drinks menu yet">
-                Got a photo of their menu?{' '}
-                <Link to={`/community?kind=update&venue=${r.id}&field=menu`} className="font-bold text-brand-300 underline">
-                  Send it in
-                </Link>{' '}
-                and we’ll add it.
-              </EmptyState>
-            ) : (
-              <div className="space-y-6">
-                {sections.length > 0 && (
-                  <>
-                    {sections.length > 1 && (
-                      <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-4 px-4">
-                        {sections.map(([name]) => (
-                          <a key={name} href={`#menu-${encodeURIComponent(name)}`} className="shrink-0 px-3 py-1.5 rounded-full bg-night-900 border border-white/10 text-xs font-extrabold text-night-100 hover:bg-white/5">
-                            {name}
-                          </a>
-                        ))}
-                      </div>
-                    )}
-                    {sections.map(([name, items]) => (
-                      <section key={name} id={`menu-${encodeURIComponent(name)}`} className="bg-night-900 rounded-3xl border border-white/10 p-5 scroll-mt-36">
-                        <h3 className="font-display text-xl font-extrabold text-white mb-1 text-center">{name}</h3>
-                        <div className="mx-auto mb-2 w-16 h-0.5 bg-gradient-to-r from-brand-500 to-glow-400 rounded glow-brand" />
-                        <ul>
-                          {items.map((item) => (
-                            <li key={item.id} className="py-3">
-                              <div className="flex items-baseline gap-2">
-                                <p className="text-base font-extrabold text-white">{item.name}</p>
-                                <span className="leader" aria-hidden />
-                                {item.price != null && <span className="font-extrabold text-glow-300 shrink-0">{money(Number(item.price))}</span>}
-                              </div>
-                              {item.description && <p className="text-sm text-night-300 font-medium italic mt-0.5">{item.description}</p>}
-                            </li>
-                          ))}
-                        </ul>
-                      </section>
-                    ))}
-                  </>
-                )}
-                {menuPhotos.length > 0 && (
-                  <div>
-                    <h3 className="text-sm font-extrabold uppercase tracking-widest text-brand-300 mb-3">Menu photos</h3>
-                    <PhotoGrid photos={menuPhotos} onOpen={(i) => openPhotos(menuPhotos, i)} />
-                  </div>
-                )}
-                <p className="text-xs font-semibold text-night-400">Prices in BSD and may change — check with the venue.</p>
-              </div>
-            ))}
+          {(tab === 'menu' || tab === 'food') && renderMenu(tab === 'food' ? 'food' : 'drinks')}
 
           {tab === 'photos' &&
             (loadingDetail ? (

@@ -67,18 +67,20 @@ values
    null, true, false)
 on conflict (slug) do nothing;
 
--- A sample drinks menu for the rum shack.
-insert into public.menu_items (venue_id, section, name, description, price, sort)
-select v.id, m.section, m.name, m.description, m.price, m.sort
+-- Sample drinks and food menus for the rum shack.
+insert into public.menu_items (venue_id, menu, section, name, description, price, sort)
+select v.id, m.menu, m.section, m.name, m.description, m.price, m.sort
 from public.venues v
 cross join (values
-  ('Cocktails', 'Sky Juice', 'Gin, coconut water, condensed milk', 12.00, 1),
-  ('Cocktails', 'Rum Punch', 'House rum, tropical juices, nutmeg', 14.00, 2),
-  ('Cocktails', 'Goombay Smash', 'Coconut rum, pineapple, apricot brandy', 15.00, 3),
-  ('Beer', 'Kalik', null, 7.00, 4),
-  ('Beer', 'Sands', null, 7.00, 5),
-  ('Bites', 'Conch Fritters', 'With spicy calypso sauce', 12.00, 6)
-) as m(section, name, description, price, sort)
+  ('drinks', 'Cocktails', 'Sky Juice', 'Gin, coconut water, condensed milk', 12.00, 1),
+  ('drinks', 'Cocktails', 'Rum Punch', 'House rum, tropical juices, nutmeg', 14.00, 2),
+  ('drinks', 'Cocktails', 'Goombay Smash', 'Coconut rum, pineapple, apricot brandy', 15.00, 3),
+  ('drinks', 'Beer', 'Kalik', null, 7.00, 4),
+  ('drinks', 'Beer', 'Sands', null, 7.00, 5),
+  ('food', 'Bites', 'Conch Fritters', 'With spicy calypso sauce', 12.00, 6),
+  ('food', 'Bites', 'Cracked Conch', 'Fried, with fries and coleslaw', 18.00, 7),
+  ('food', 'Plates', 'Grilled Snapper', 'Peas ''n'' rice, plantain', 26.00, 8)
+) as m(menu, section, name, description, price, sort)
 where v.slug = 'demo-arawak-rum-shack'
   and not exists (select 1 from public.menu_items mi where mi.venue_id = v.id);
 

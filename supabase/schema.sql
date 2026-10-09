@@ -165,7 +165,7 @@ create policy "Admins manage venues" on public.venues
 create table if not exists public.venue_photos (
   id            uuid primary key default gen_random_uuid(),
   venue_id uuid not null references public.venues (id) on delete cascade,
-  kind          text not null default 'gallery' check (kind in ('gallery', 'menu')),
+  kind          text not null default 'gallery' check (kind in ('gallery', 'menu', 'food_menu')),
   url           text not null,
   storage_path  text,               -- path inside the venue-media bucket (for deletes)
   caption       text,
@@ -175,6 +175,12 @@ create table if not exists public.venue_photos (
 
 create index if not exists venue_photos_venue_idx
   on public.venue_photos (venue_id, kind, sort);
+
+-- Photos of a printed menu: 'menu' = the drinks menu (the original kind, so
+-- existing rows keep their meaning), 'food_menu' = the food menu.
+alter table public.venue_photos drop constraint if exists venue_photos_kind_check;
+alter table public.venue_photos add constraint venue_photos_kind_check
+  check (kind in ('gallery', 'menu', 'food_menu'));
 
 alter table public.venue_photos enable row level security;
 
@@ -204,6 +210,27 @@ create table if not exists public.menu_items (
 );
 
 create index if not exists menu_items_venue_idx on public.menu_items (venue_id, sort);
+
+-- Separate drinks and food menus. Added later: existing items are sorted
+-- into one once, by section name (anything food-sounding goes to food).
+do $$
+begin
+  if not exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'menu_items' and column_name = 'menu') then
+    alter table public.menu_items add column menu text not null default 'drinks';
+    update public.menu_items set menu = 'food'
+    where section ~* '(food|bite|snack|starter|appetizer|appetiser|main|entree|entrée|plate|platter|burger|wing|taco|pizza|sandwich|salad|soup|side|dessert|kitchen|grill|seafood|conch|fish|chicken|brunch|breakfast|lunch|dinner|eat)';
+  end if;
+end $$;
+
+alter table public.menu_items drop constraint if exists menu_items_menu_check;
+alter table public.menu_items add constraint menu_items_menu_check check (menu in ('drinks', 'food'));
+
+-- One optional photo per item (venue-media: <venue_id>/items/…), and the
+-- number of members who like it (kept by a trigger on menu_item_likes).
+alter table public.menu_items add column if not exists photo_url  text;
+alter table public.menu_items add column if not exists photo_path text;
+alter table public.menu_items add column if not exists like_count int not null default 0;
 
 alter table public.menu_items enable row level security;
 
@@ -550,6 +577,71 @@ create policy "Members edit their own reviews" on public.reviews
 drop policy if exists "Members or admins delete reviews" on public.reviews;
 create policy "Members or admins delete reviews" on public.reviews
   for delete using (user_id = auth.uid() or public.is_admin());
+
+-- Likes on individual menu items (drinks and food): one per member per item.
+-- Members only see their own likes; everyone sees menu_items.like_count.
+create table if not exists public.menu_item_likes (
+  item_id    uuid not null references public.menu_items (id) on delete cascade,
+  user_id    uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (item_id, user_id)
+);
+
+create index if not exists menu_item_likes_user_idx on public.menu_item_likes (user_id);
+
+alter table public.menu_item_likes enable row level security;
+
+drop policy if exists "Members see their own likes" on public.menu_item_likes;
+create policy "Members see their own likes" on public.menu_item_likes
+  for select using (user_id = auth.uid() or public.is_admin());
+
+drop policy if exists "Members like items on published spots" on public.menu_item_likes;
+create policy "Members like items on published spots" on public.menu_item_likes
+  for insert to authenticated
+  with check (
+    user_id = auth.uid()
+    and not public.is_suspended()
+    and exists (
+      select 1 from public.menu_items m join public.venues v on v.id = m.venue_id
+      where m.id = item_id and v.is_published
+    )
+  );
+
+drop policy if exists "Members unlike their own likes" on public.menu_item_likes;
+create policy "Members unlike their own likes" on public.menu_item_likes
+  for delete using (user_id = auth.uid() or public.is_admin());
+
+-- security definer: members can't update menu_items themselves.
+create or replace function public.menu_item_likes_count()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op = 'INSERT' then
+    update public.menu_items set like_count = like_count + 1 where id = new.item_id;
+  else
+    update public.menu_items set like_count = greatest(like_count - 1, 0) where id = old.item_id;
+  end if;
+  return null;
+end;
+$$;
+
+drop trigger if exists menu_item_likes_count on public.menu_item_likes;
+create trigger menu_item_likes_count
+  after insert or delete on public.menu_item_likes
+  for each row execute function public.menu_item_likes_count();
+
+-- Re-running the file also repairs any drifted counts.
+update public.menu_items m
+set like_count = c.n
+from (
+  select i.id, count(l.item_id)::int as n
+  from public.menu_items i left join public.menu_item_likes l on l.item_id = i.id
+  group by i.id
+) c
+where c.id = m.id and m.like_count <> c.n;
 
 -- Per-spot rating summary (visible reviews only). security_invoker makes the
 -- view respect the caller's RLS instead of the owner's.
