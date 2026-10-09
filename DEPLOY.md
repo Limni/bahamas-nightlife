@@ -85,12 +85,18 @@ Optional **Variables**:
 
 - **Stadia Maps** (map tiles): create a free account at stadiamaps.com and add `nassaunights.limniatis.com`, `nassaunights.com` and `www.nassaunights.com` as allowed domains. Until you do, the map will show no tiles on the live site. It works on localhost without this.
 - **Supabase**: Nassau Nights uses its **own** Supabase project (not Nassau Eats'). Create it, run `supabase/schema.sql` in the SQL Editor, and put its URL and anon key in the repo secrets above. Under Authentication → URL Configuration, set **Site URL** to the domain you want auth emails to point at by default (e.g. `https://nassaunights.com`), and add **Redirect URLs** `https://nassaunights.com/**`, `https://www.nassaunights.com/**`, `https://nassaunights.limniatis.com/**` and `http://localhost:3000/**`. The app asks for a redirect back to whichever domain the visitor is on; Supabase only honours ones in that list (otherwise it falls back to the Site URL).
-- **Member invitations** (Admin → Members → Invite). Three one-time steps in the Supabase dashboard:
-  1. **SMTP:** Authentication → Emails → SMTP Settings → set up a custom sender (e.g. Resend, Postmark, Brevo, or your mail host). Supabase's built-in mailer only delivers to members of your Supabase team and a few emails an hour, so invitations to anyone else won't arrive without it.
-  2. **Function:** Edge Functions → **Deploy a new function** → **Via editor**, name it exactly `invite-member`, paste `supabase/functions/invite-member/index.ts` and deploy. Leave **Verify JWT** on. (With the CLI: `supabase functions deploy invite-member`.) It needs no secrets: the project URL and keys are provided to it automatically, and the service-role key stays inside Supabase.
-  3. **Email:** Authentication → Emails → Templates → **Invite user**: subject `You're invited to Nassau Nights 🌴`, and paste `supabase/templates/invite.html` into the message body (Source view).
+- **Member invitations** (Admin → Members → Invite):
+  1. **Function (required):** Edge Functions → **Deploy a new function** → **Via editor**, name it exactly `invite-member`, paste `supabase/functions/invite-member/index.ts` and deploy. Leave **Verify JWT** on. (With the CLI: `supabase functions deploy invite-member`.) The project URL and keys are provided to it automatically; the service-role key never leaves Supabase.
 
-  The invite link returns to `/account` on the domain the admin sent it from, so that domain must be in the Redirect URLs above. The email's logo is loaded from the **Site URL**. Links expire after 24 hours (Authentication → Emails → "Email OTP expiration"); **Resend invite** sends a fresh one.
+     That's enough to invite people: the console makes the invite and gives you the link to send with **Copy**, **WhatsApp**, **Email app** or the phone's share sheet. It doesn't use Supabase's own invite email or its templates, so the free plan is fine.
+  2. **Automatic styled emails (optional):** the function emails its own Nassau Nights invitation through [Resend](https://resend.com) (free: 100 emails a day, 3,000 a month):
+     - Sign up, then **Domains → Add domain** `nassaunights.com` and add the DNS records it shows in Cloudflare (**DNS only**, not proxied). Wait for "Verified".
+     - **API Keys → Create** (permission: Sending access).
+     - In Supabase: Edge Functions → **Secrets** → add `RESEND_API_KEY` (the key) and `INVITE_FROM` (for example `Nassau Nights <hello@nassaunights.com>`; the address must be on the verified domain). No redeploy needed.
+
+     If sending ever fails, the console falls back to showing the link, with the reason.
+
+  Invite links return to `/account` on the domain the admin is using, so that domain must be in the Redirect URLs above. They expire after 24 hours (Authentication → Emails → "Email OTP expiration"); **Resend invite** makes a fresh one.
 - **Optional, pg_cron**: Database → Extensions → enable `pg_cron`, then run the `cron.schedule(...)` line at the end of `schema.sql`. Live levels then fade on the minute even when nobody has the site open; without it they fade on the next ping or page view.
 
 ## 6. Deploy

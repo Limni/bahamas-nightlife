@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Ban, ChevronDown, KeyRound, MailCheck, Search, Send, ShieldCheck, ShieldOff, Trash2, Undo2, UserPlus, Users as UsersIcon, X } from 'lucide-react';
+import { Ban, Check, ChevronDown, Copy, KeyRound, Mail, MailCheck, MessageCircle, Search, Send, Share2, ShieldCheck, ShieldOff, Trash2, Undo2, UserPlus, Users as UsersIcon, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useDirectory } from '@/lib/directory';
 import { SUBMISSION_KIND_LABELS, type SubmissionKind, type SubmissionStatus } from '@/lib/types';
@@ -61,28 +61,41 @@ const suspendedLabel = (until: string) =>
 
 const NOT_DEPLOYED = 'The invite-member function isn’t deployed yet. See DEPLOY.md, “Member invitations”.';
 
+/** What the invite-member function did: emailed the invitation, or handed back the link to share. */
+interface InviteResult {
+  error: string | null;
+  warning: string | null;
+  /** Set when no email went out (no email service configured, or sending failed). */
+  link: string | null;
+}
+
 /**
- * Sends (or re-sends) an invitation through the invite-member Edge Function,
- * which holds the service-role key. Supabase sends the "Invite user" email.
+ * Creates (or refreshes) an invitation through the invite-member Edge Function,
+ * which holds the service-role key. It emails our styled invitation when an
+ * email service is configured, and otherwise returns the link to share.
  */
-async function sendInvite(body: { email: string; display_name?: string; make_admin?: boolean }) {
+async function sendInvite(body: { email: string; display_name?: string; make_admin?: boolean }): Promise<InviteResult> {
   const { data, error } = await supabase.functions.invoke('invite-member', {
     body: { ...body, redirect_to: `${window.location.origin}/account` },
   });
-  if (!error) return { error: null, warning: (data as { warning?: string } | null)?.warning ?? null };
+  if (!error) {
+    const d = (data ?? {}) as { warning?: string; link?: string; emailed?: boolean };
+    return { error: null, warning: d.warning ?? null, link: d.emailed ? null : (d.link ?? null) };
+  }
+  const fail = (message: string): InviteResult => ({ error: message, warning: null, link: null });
   const ctx = (error as { context?: unknown }).context;
   if (ctx instanceof Response) {
-    if (ctx.status === 404) return { error: NOT_DEPLOYED, warning: null };
+    if (ctx.status === 404) return fail(NOT_DEPLOYED);
     try {
       const b = await ctx.json();
-      if (b?.error) return { error: String(b.error), warning: null };
+      if (b?.error) return fail(String(b.error));
     } catch {
       /* not JSON */
     }
   }
   // A function that doesn't exist answers without CORS headers, so it shows up as a fetch error.
-  if (error.name === 'FunctionsFetchError') return { error: `Couldn’t reach the invite function. ${NOT_DEPLOYED}`, warning: null };
-  return { error: error.message, warning: null };
+  if (error.name === 'FunctionsFetchError') return fail(`Couldn’t reach the invite function. ${NOT_DEPLOYED}`);
+  return fail(error.message);
 }
 
 const pendingInvite = (m: Member) => !!m.invited_at && !m.email_confirmed_at;
@@ -296,6 +309,7 @@ function MemberDetail({ m, me, onChanged }: { m: Member; me: boolean; onChanged:
   const [name, setName] = useState(m.display_name);
   const [suspendDays, setSuspendDays] = useState<number | null>(7);
   const [busy, setBusy] = useState<string | null>(null);
+  const [shareLink, setShareLink] = useState<{ link: string; warning: string | null } | null>(null);
   const [reviews, setReviews] = useState<MemberReview[] | null>(null);
   const [subs, setSubs] = useState<MemberSubmission[] | null>(null);
 
@@ -402,15 +416,17 @@ function MemberDetail({ m, me, onChanged }: { m: Member; me: boolean; onChanged:
     if (!m.email) return;
     const ok = await confirm({
       title: 'Send the invitation again?',
-      body: `A fresh link goes to ${m.email}; the old one stops working.`,
+      body: `A fresh link is made for ${m.email}; the old one stops working.`,
       confirmLabel: 'Resend',
     });
     if (!ok) return;
     setBusy('invite');
     const r = await sendInvite({ email: m.email });
     setBusy(null);
-    toast(r.error ?? 'Invitation sent again', r.error ? 'error' : 'success');
-    if (!r.error) onChanged();
+    if (r.error) return toast(r.error, 'error');
+    if (r.link) setShareLink({ link: r.link, warning: r.warning });
+    else toast(r.warning ?? 'Invitation sent again', r.warning ? 'error' : 'success');
+    onChanged();
   };
 
   const remove = async () => {
@@ -503,6 +519,10 @@ function MemberDetail({ m, me, onChanged }: { m: Member; me: boolean; onChanged:
           </div>
         )}
       </div>
+
+      {shareLink && m.email && (
+        <ShareInvite email={m.email} name={m.display_name} link={shareLink.link} warning={shareLink.warning} onDone={() => setShareLink(null)} />
+      )}
 
       {!me && (
         <div className="space-y-2">
@@ -617,6 +637,7 @@ function InvitePanel({ onClose, onSent }: { onClose: () => void; onSent: () => v
   const [makeAdmin, setMakeAdmin] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [shared, setShared] = useState<{ email: string; name: string; link: string; warning: string | null } | null>(null);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -626,12 +647,21 @@ function InvitePanel({ onClose, onSent }: { onClose: () => void; onSent: () => v
     const r = await sendInvite({ email: to, display_name: name.trim() || undefined, make_admin: makeAdmin });
     setBusy(false);
     if (r.error) return setError(r.error);
-    toast(r.warning ?? `Invitation sent to ${to}`, r.warning ? 'error' : 'success');
+    if (r.link) setShared({ email: to, name: name.trim(), link: r.link, warning: r.warning });
+    else toast(r.warning ?? `Invitation emailed to ${to}`, r.warning ? 'error' : 'success');
     setEmail('');
     setName('');
     setMakeAdmin(false);
     onSent();
   };
+
+  if (shared) {
+    return (
+      <div className="bg-white rounded-2xl border border-brand-200 shadow-sm p-4 md:p-5">
+        <ShareInvite email={shared.email} name={shared.name} link={shared.link} warning={shared.warning} onDone={() => setShared(null)} doneLabel="Invite someone else" />
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={submit} className="bg-white rounded-2xl border border-brand-200 shadow-sm p-4 md:p-5 space-y-4">
@@ -641,7 +671,7 @@ function InvitePanel({ onClose, onSent }: { onClose: () => void; onSent: () => v
             <Send className="w-4 h-4 text-brand-600" /> Invite someone
           </h2>
           <p className="text-sm font-semibold text-slate-500">
-            They get a Nassau Nights email with a link to choose a password. The link expires after 24 hours.
+            They get a link to join and choose a password, by email if it’s set up, or for you to share. It expires after 24 hours.
           </p>
         </div>
         <button type="button" onClick={onClose} aria-label="Close" className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700">
@@ -670,5 +700,90 @@ function InvitePanel({ onClose, onSent }: { onClose: () => void; onSent: () => v
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * The invite link, for when no email went out (no email service set up, or it
+ * failed): copy it, or send it through WhatsApp, the share sheet or the
+ * admin's own email app.
+ */
+function ShareInvite({
+  email,
+  name,
+  link,
+  warning,
+  onDone,
+  doneLabel = 'Done',
+}: {
+  email: string;
+  name: string;
+  link: string;
+  warning: string | null;
+  onDone: () => void;
+  doneLabel?: string;
+}) {
+  const { toast } = useFeedback();
+  const [copied, setCopied] = useState(false);
+  const first = name && name !== 'Member' ? name.split(' ')[0] : '';
+  const message = `${first ? `Hi ${first}! ` : ''}You’re invited to Nassau Nights, the live guide to Nassau after dark 🌴 Tap to join and choose a password (the link works once and expires in 24 hours):\n${link}`;
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      toast('Couldn’t copy; select the link and copy it instead', 'error');
+    }
+  };
+  const share = async () => {
+    try {
+      await navigator.share({ title: 'You’re invited to Nassau Nights', text: message });
+    } catch {
+      /* dismissed */
+    }
+  };
+  const mailto = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent('You’re invited to Nassau Nights 🌴')}&body=${encodeURIComponent(message)}`;
+
+  return (
+    <div className="rounded-2xl bg-brand-50 border border-brand-200 p-4 space-y-3">
+      <div>
+        <p className="flex items-center gap-2 font-extrabold text-slate-900">
+          <Check className="w-4 h-4 text-emerald-600" /> Invite ready for {email}
+        </p>
+        <p className="text-sm font-semibold text-slate-600">
+          {warning ?? 'Invitation emails aren’t set up, so send them this link yourself.'} It works once and expires in 24 hours. Anyone with it can claim the
+          account, so send it only to them.
+        </p>
+      </div>
+      <div className="flex gap-2">
+        <input className={`${inputClass} font-mono text-xs`} readOnly value={link} onFocus={(e) => e.currentTarget.select()} aria-label="Invite link" />
+        <Button variant="secondary" onClick={copy} className="shrink-0">
+          {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />} {copied ? 'Copied' : 'Copy'}
+        </Button>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <a
+          href={`https://wa.me/?text=${encodeURIComponent(message)}`}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-extrabold bg-emerald-600 text-white hover:bg-emerald-700"
+        >
+          <MessageCircle className="w-4 h-4" /> WhatsApp
+        </a>
+        <a href={mailto} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-extrabold bg-white text-slate-800 border border-slate-200 hover:bg-slate-50">
+          <Mail className="w-4 h-4" /> Email app
+        </a>
+        {'share' in navigator && (
+          <Button variant="secondary" onClick={share}>
+            <Share2 className="w-4 h-4" /> Share…
+          </Button>
+        )}
+        <Button variant="ghost" onClick={onDone} className="ml-auto">
+          {doneLabel}
+        </Button>
+      </div>
+    </div>
   );
 }
