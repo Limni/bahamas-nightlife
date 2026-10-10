@@ -3,6 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- Google tag (gtag.js). GA4 "enhanced measurement" counts in-app route
+         changes (history events) as page views, so the SPA needs no extra code. -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-FWM1NM6DRJ"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'G-FWM1NM6DRJ');
+    </script>
     <title>Nassau Nights — Bars, clubs & events in Nassau</title>
     <meta name="description" content="Nightlife in Nassau, Bahamas: bars, clubs, beach bars and events on a live map that shows where it's buzzing right now." />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />

@@ -46,6 +46,7 @@ jobs:
             VITE_SUPABASE_ANON_KEY=${{ secrets.VITE_SUPABASE_ANON_KEY }}
             VITE_MAP_TILE_URL=${{ vars.VITE_MAP_TILE_URL }}
             VITE_MAP_ATTRIBUTION=${{ vars.VITE_MAP_ATTRIBUTION }}
+            SITE_URL=${{ vars.SITE_URL }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

@@ -80,6 +80,7 @@ Go to **Settings → Secrets and variables → Actions**.
 Optional **Variables**:
 - `PORT`: overrides the default `5110`. If you change it, change the vhost upstream too.
 - `VITE_MAP_TILE_URL` and `VITE_MAP_ATTRIBUTION`: switch the map tile provider.
+- `SITE_URL`: the domain used in `sitemap.xml` and `robots.txt` (default `https://nassaunights.com`). Set it to the property you verify in Google Search Console, e.g. `https://nassaunights.limniatis.com`.
 
 ## 5. Outside the server
 
@@ -98,6 +99,11 @@ Optional **Variables**:
 
   Invite links return to `/account` on the domain the admin is using, so that domain must be in the Redirect URLs above. They expire after 24 hours (Authentication → Emails → "Email OTP expiration"); **Resend invite** makes a fresh one.
 - **Optional, pg_cron**: Database → Extensions → enable `pg_cron`, then run the `cron.schedule(...)` line at the end of `schema.sql`. Live levels then fade on the minute even when nobody has the site open; without it they fade on the next ping or page view.
+
+## 5b. Google Analytics and Search Console
+
+- **Analytics:** the GA4 tag (`G-FWM1NM6DRJ`) is in `index.html`, so every page of every domain the site is served on reports to that property. Route changes inside the app count as page views through GA4's enhanced measurement (Admin → Data streams → the stream → Enhanced measurement → "Page changes based on browser history events", on by default).
+- **Search Console:** every build writes `/sitemap.xml` (fixed pages, every published venue, every event that hasn't ended) and `/robots.txt` (points at the sitemap; keeps `/admin`, `/manage` and `/account` out). Add the property for the domain in `SITE_URL`, verify it (a DNS TXT record in Cloudflare is easiest), then **Sitemaps → Add** `sitemap.xml`. New venues and events appear in it on the next deploy.
 
 ## 6. Deploy
 

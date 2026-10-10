@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build",
+    "build": "vite build && node scripts/sitemap.mjs",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
     "seed:google": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/seed-google.ts"

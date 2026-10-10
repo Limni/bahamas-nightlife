@@ -21,7 +21,7 @@ It is a static React SPA with **no custom backend** (the one exception is a Supa
 ```bash
 npm install
 npm run dev          # Vite dev server on http://localhost:3000 (all interfaces)
-npm run build        # production build -> dist/
+npm run build        # production build -> dist/, then scripts/sitemap.mjs writes sitemap.xml + robots.txt
 npm run preview      # serve dist/
 npm run lint         # type-check only (tsc --noEmit); there is no ESLint
 npm run seed:google  # import Google Places venues as drafts (see below)
@@ -49,7 +49,7 @@ Path alias: `@/` → `src/` (in both `vite.config.ts` and `tsconfig.json`).
 ## Repository layout
 
 ```
-index.html                 HTML shell (fonts via CSS, manifest, theme-color #0a0714)
+index.html                 HTML shell (fonts via CSS, manifest, theme-color #0a0714, Google Analytics gtag G-FWM1NM6DRJ)
 public/
   sw.js                    service worker — caches MAP TILES ONLY (cache-first)
   manifest.webmanifest     PWA manifest
@@ -130,6 +130,7 @@ supabase/
   functions/invite-member/ Edge Function (Deno): admin-only invites (generateLink + our own styled email)
 scripts/
   seed-google.ts           Google Places importer (Node, service-role key)
+  sitemap.mjs              runs after `vite build`: dist/sitemap.xml + robots.txt from published venues/events
 deploy/                    host nginx vhost, HTTPS installer, vm-setup.sh (no-clone installer)
 Dockerfile, nginx.conf     container build + in-container SPA server
 deploy.sh                  manual build/run script (same shape as Island GO's)
@@ -403,6 +404,7 @@ All `VITE_*` values are **inlined at build time** and are public (they ship in t
 | `VITE_MAP_TILE_URL`, `VITE_MAP_ATTRIBUTION` | optional; GitHub **variables** in CI | empty falls back to Stadia defaults |
 | `GOOGLE_MAPS_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | `.env` / `.env.local` only | **secret**, used only by `scripts/seed-google.ts`; never prefix with `VITE_` |
 | `RESEND_API_KEY`, `INVITE_FROM` | Supabase **Edge Functions → Secrets** (not the repo) | optional; let `invite-member` email invitations itself. Without them admins share the invite link |
+| `SITE_URL` | GitHub **variable** (Docker build arg) / env | domain for `sitemap.xml` / `robots.txt`, default `https://nassaunights.com` (set it to the Search Console property) |
 | `PORT` | GitHub variable / `.env` for `deploy.sh` | host port, default `5110` |
 
 `.env*` is git-ignored (except `.env.example`). **Never commit real secrets.** The service-role key bypasses RLS and must never reach the browser.
@@ -446,6 +448,7 @@ The full runbook is in **`DEPLOY.md`**. The essentials:
 - **DNS:** Cloudflare `nassaunights` record, proxied. A first-level subdomain is covered by `*.limniatis.com` Universal SSL.
 - **Second domain:** the vhost's `server_name` also lists `nassaunights.com` and `www.nassaunights.com` (served directly, no redirect). That zone must be proxied by Cloudflare in **Full** (not strict) mode, because the origin reuses Island GO's certificate. The app has no hard-coded domain: auth email links use `window.location.origin`.
 - **Manual deploy:** `./deploy.sh build|deploy|update|logs|stop|status`. It reads `.env`, then `.env.local`.
+- **Analytics / SEO:** GA4 (`G-FWM1NM6DRJ`) is a plain gtag snippet in `index.html`; SPA route changes are counted by GA4 enhanced measurement (history events), so there is no router hook. `scripts/sitemap.mjs` builds the sitemap at build time with the anon key (RLS = published only) and never fails the build (no Supabase → fixed pages only). nginx serves `/sitemap.xml` and `/robots.txt` as files with a 1-hour cache.
 
 ## Supabase dashboard settings the app depends on
 

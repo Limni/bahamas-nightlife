@@ -52,6 +52,7 @@ build() {
     --build-arg VITE_SUPABASE_ANON_KEY="${VITE_SUPABASE_ANON_KEY:-}" \
     --build-arg VITE_MAP_TILE_URL="${VITE_MAP_TILE_URL:-}" \
     --build-arg VITE_MAP_ATTRIBUTION="${VITE_MAP_ATTRIBUTION:-}" \
+    --build-arg SITE_URL="${SITE_URL:-}" \
     -t "$IMAGE" \
     .
   log "Build complete."
