@@ -145,7 +145,7 @@ README.md, DEPLOY.md       human docs
 | `/` | Explore | eager-loaded; everything else is `lazy()`. Any public URL takes `?theme=<id>` to preview a theme in that tab (`?theme=off` ends it) |
 | `/map` | MapPage | `?focus=<venue id>` opens that venue's drawer, `?event=<event id>` an event's |
 | `/v/:slug` | VenuePage | `?tab=menu\|food\|photos\|reviews` (the "menu" tab is labelled Drinks; Food shows only when there's a food menu) |
-| `/events` | EventsPage | |
+| `/events` | EventsPage | `?range=tonight\|week\|featured` selects the range chip |
 | `/events/:id` | EventPage | also loads past events and (for admins) drafts |
 | `/community` | Community | `?kind=new_spot\|update\|closed\|event\|other&venue=<id>&field=menu\|photos\|hours\|phone` pre-fills the form |
 | `/account` | Account | `?mode=signup`, `?next=/path` (in-app paths only; validated by `safeNext`); `#activity` is the sharing switch |
@@ -264,7 +264,7 @@ Only admins may change `reviews.is_hidden`. The `reviews_guard` trigger forces `
 ## Features (what each part does)
 
 ### Explore (`/`)
-- **Hero:** a `.neon-board` panel. A time-of-night greeting (Nassau time) with a matching one-tap suggestion (beach bars / waterfront / happy hour / dancing on Fri–Sat / live bands / open late; shown only if that tag exists). Headline "Nassau after dark." in flickering neon. Search + filters, quick buttons (Buzzing now, Open now, Near me, Events), live stats (spots, open now, buzzing, events tonight), and a "Help light up the map" opt-in when location isn't on yet. On desktop: the **live board**, which shows the busiest venues now, else tonight's events, else the scene's venue types.
+- **Hero:** a `.neon-board` panel. A time-of-night greeting (Nassau time) with a matching one-tap suggestion (beach bars / waterfront / happy hour / dancing on Fri–Sat / live bands / open late; shown only if that tag exists). Headline "Nassau after dark." in flickering neon. Search + filters, quick buttons (Buzzing now, Open now, Near me, Events), live stats that are also shortcuts (spots → all spots, open now / buzzing → that filter via `apply()`, events tonight → `/events?range=tonight`), and a "Help light up the map" opt-in when location isn't on yet. On desktop: the **live board**, which shows the busiest venues now, else tonight's events, else the scene's venue types.
 - **Browse sections** (no search/filters): Happening tonight (events rail, live first), Buzzing right now (by `buzzScore`), venue-type tiles, Popular this month (30-day visits, 3+ needed), Open right now, Featured, Find your vibe, Fresh on the scene, neighbourhoods.
 - **All spots:** sort Top picks / **Buzzing** / **Popular** / Top rated (weighted `(avg·n + 3.5·3)/(n+3)`) / Nearest / A–Z / New; grid/list; removable chips. A note explains an empty Buzzing list (nobody sharing yet).
 - Tapping a tile or chip calls `apply()`, which **replaces** all filters with that one and scrolls to the results.

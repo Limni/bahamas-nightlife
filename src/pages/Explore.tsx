@@ -347,11 +347,12 @@ export default function Explore() {
     ...filters.areas.map((a) => ({ label: a, remove: () => toggle('areas', a) })),
   ];
 
-  const stats = [
-    { value: venues.length, label: venues.length === 1 ? 'spot' : 'spots' },
-    { value: openNow.length, label: 'open now' },
-    { value: buzzing.length, label: 'buzzing' },
-    { value: tonight.length, label: tonight.length === 1 ? 'event tonight' : 'events tonight' },
+  // Each number is a shortcut to what it counts.
+  const stats: { value: number; label: string; hint: string; onClick?: () => void; to?: string }[] = [
+    { value: venues.length, label: venues.length === 1 ? 'spot' : 'spots', hint: 'See all spots', onClick: () => apply({}) },
+    { value: openNow.length, label: 'open now', hint: 'Show spots open now', onClick: () => apply({ openNow: true }) },
+    { value: buzzing.length, label: 'buzzing', hint: 'Show spots buzzing now', onClick: () => apply({ busyNow: true }) },
+    { value: tonight.length, label: tonight.length === 1 ? 'event tonight' : 'events tonight', hint: 'See tonight’s events', to: '/events?range=tonight' },
   ];
 
   const pill = 'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white/10 hover:bg-white/15 border border-white/15 text-sm font-bold';
@@ -414,15 +415,30 @@ export default function Explore() {
                 )}
               </div>
 
-              <dl className="mt-8 grid grid-cols-4 gap-2 max-w-lg">
-                {stats.map((s) => (
-                  <div key={s.label} className="border-l-2 border-brand-400/60 pl-3">
-                    <dt className="sr-only">{s.label}</dt>
-                    <dd className="font-display text-2xl md:text-3xl font-extrabold leading-none">{s.value}</dd>
-                    <dd className="text-[10px] md:text-xs font-bold uppercase tracking-wider text-night-300 mt-1">{s.label}</dd>
-                  </div>
-                ))}
-              </dl>
+              <div className="mt-8 grid grid-cols-4 gap-2 max-w-lg">
+                {stats.map((s) => {
+                  const body = (
+                    <>
+                      <span className="block font-display text-2xl md:text-3xl font-extrabold leading-none group-hover:text-brand-200 transition-colors">{s.value}</span>
+                      <span className="flex items-center gap-0.5 text-[10px] md:text-xs font-bold uppercase tracking-wider text-night-300 group-hover:text-night-100 mt-1 transition-colors">
+                        {s.label}
+                        <ChevronRight className="w-3 h-3 shrink-0 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition" aria-hidden />
+                      </span>
+                    </>
+                  );
+                  const cls =
+                    'group block text-left border-l-2 border-brand-400/60 hover:border-brand-300 pl-3 py-1 -my-1 rounded-r-lg hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 transition-colors';
+                  return s.to ? (
+                    <Link key={s.label} to={s.to} className={cls} aria-label={`${s.value} ${s.label}: ${s.hint}`}>
+                      {body}
+                    </Link>
+                  ) : (
+                    <button key={s.label} type="button" onClick={s.onClick} className={cls} aria-label={`${s.value} ${s.label}: ${s.hint}`}>
+                      {body}
+                    </button>
+                  );
+                })}
+              </div>
 
               {supabaseConfigured && consent === null && !location && (
                 <button

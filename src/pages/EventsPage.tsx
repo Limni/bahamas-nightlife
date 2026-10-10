@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useMemo } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { CalendarHeart, CalendarPlus, Map as MapIcon } from 'lucide-react';
 import { useDirectory } from '@/lib/directory';
 import { compareEvents, eventNextStart, isEventEnded, isEventLive, isEventSoon } from '@/lib/events';
@@ -33,7 +33,11 @@ function Group({ title, eyebrow, events, now }: { title: string; eyebrow?: strin
 export default function EventsPage() {
   const { events, loading } = useDirectory();
   const now = useNow();
-  const [range, setRange] = useState<Range>('all');
+  // ?range=tonight|week|featured, so other pages (the Explore stats) can link to a view.
+  const [params, setParams] = useSearchParams();
+  const fromUrl = params.get('range');
+  const range: Range = fromUrl === 'tonight' || fromUrl === 'week' || fromUrl === 'featured' ? fromUrl : 'all';
+  const setRange = (r: Range) => setParams(r === 'all' ? {} : { range: r }, { replace: true });
 
   const groups = useMemo(() => {
     let list = events.filter((e) => !isEventEnded(e, now)).sort(compareEvents(now));
