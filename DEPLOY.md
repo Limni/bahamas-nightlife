@@ -132,3 +132,55 @@ curl -sI -H 'Host: islandgo.limniatis.com'  http://127.0.0.1/ | head -1    # Isl
 # :443 is what Cloudflare actually uses. Expect "Nassau Nights", not "Nassau GO".
 curl -sk --resolve nassaunights.limniatis.com:443:127.0.0.1 https://nassaunights.limniatis.com/ | grep -o '<title>[^<]*</title>'
 ```
+
+## Review improvements: required rollout before merging
+
+The `codex/nassau-review-improvements` change adds a submission Edge Function,
+service-only quota RPCs, and `venues.visit_notes`. The website deployment alone
+is insufficient. The public anon key cannot apply database DDL; the project
+owner must run the schema in the Supabase SQL Editor or use a database connection.
+Never place a service-role key in `VITE_*` or frontend build arguments.
+
+1. Test the complete rollout in a staging Supabase project first. Set a random
+   `SUBMISSION_RATE_SALT` secret of at least 32 characters in that project's Edge
+   Function secrets, and deploy `supabase/functions/submit-suggestion/index.ts`
+   as `submit-suggestion`, keeping JWT verification enabled. Supabase provides
+   `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` automatically.
+2. Run the complete, idempotent `supabase/schema.sql`. This removes direct public
+   suggestion inserts and photo uploads. The previous frontend cannot submit
+   after this step, so coordinate the frontend release in the same short window.
+3. Deploy the frontend from this change. Confirm guest and member suggestions,
+   a photo, retrying the same request, and a seventh request returning 429 in
+   staging. Verify the gateway supplies `X-Forwarded-For`: the function uses the
+   last appended address for guests, salted/hashed before storage. If a custom
+   proxy changes that contract, configure a trusted address source before rollout.
+4. Confirm venue managers can save practical notes only on their assigned venues.
+   Check the resulting HTML source for a venue/event's social preview, and that
+   `/sitemap.xml` lists published detail pages.
+5. Repeat the coordinated rollout on production after approval. Keep the PR draft
+   until the backend prerequisites are ready. A frontend-only rollback leaves
+   old submissions unavailable; use a coordinated rollback or fix forward.
+
+Limits: six new request IDs per sender per hour, 120 globally per hour, six photos,
+8 MB each and 32 MB for the entire multipart request. Failed attempts consume a
+reservation; the same payload/ID may resume after two minutes. Completed IDs remain
+reserved so delayed retries cannot create duplicates. Reservations contain salted
+sender hashes, never raw IP addresses; completed suggestions and their contact
+fields retain the existing moderation access rules. Monitor reservation storage
+and review a retention policy before pruning completed IDs. Abandoned partial
+uploads can be cleaned from the private bucket after checking that no submission
+references them; keep retry reservations together with their uploads until that
+cleanup. Do not expose the salt or request table to public clients.
+
+Social cards and the sitemap use published data at **build time**. Rebuild after
+publishing/removing listings or changing event details so link previews catch up.
+Visitors still receive live directory updates. Build-time data fetch failures fail
+the build instead of silently publishing incomplete metadata. CI uses
+`PRERENDER_SKIP_DATA=1` and fake public credentials, so PR checks never need
+production secrets or write to production.
+
+Validation: Node 24 runs `npm ci`, `npm test`, `npm run lint`, `npm run build`.
+Tests include an isolated PostgreSQL-compatible PGlite database for the added
+migration, quotas, permission grants and retry behavior; they do not replace the
+staging checks of Supabase Auth, Storage, gateway headers, RLS and Realtime.
+`deno check supabase/functions/submit-suggestion/index.ts` checks the Edge Function.

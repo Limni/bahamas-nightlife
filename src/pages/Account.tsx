@@ -112,11 +112,12 @@ function SignedOut() {
       )}
       <form onSubmit={submit} className="space-y-3">
         {mode === 'signup' && (
-          <input className={input} placeholder="Your name (shown on reviews)" value={name} onChange={(e) => setName(e.target.value)} maxLength={40} autoComplete="nickname" required />
+          <><label className="block text-sm font-bold" htmlFor="account-name">Your name (shown on reviews)</label><input id="account-name" className={input} placeholder="Your name (shown on reviews)" value={name} onChange={(e) => setName(e.target.value)} maxLength={40} autoComplete="nickname" required /></>
         )}
-        <input className={input} type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required />
+        <label className="block text-sm font-bold" htmlFor="account-email">Email</label>
+        <input id="account-email" aria-describedby={error ? "account-error" : undefined} className={input} type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required />
         {mode !== 'forgot' && (
-          <input
+          <><label className="block text-sm font-bold" htmlFor="account-password">Password</label><input id="account-password" aria-describedby={error ? 'account-error' : undefined}
             className={input}
             type="password"
             placeholder={mode === 'signup' ? 'Password (8+ characters)' : 'Password'}
@@ -124,9 +125,9 @@ function SignedOut() {
             onChange={(e) => setPassword(e.target.value)}
             autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
             required
-          />
+          /></>
         )}
-        {error && <p className="text-sm font-bold text-brand-200 bg-white/5 border border-white/10 rounded-2xl px-4 py-3">{error}</p>}
+        {error && <p id="account-error" role="alert" className="text-sm font-bold text-brand-200 bg-white/5 border border-white/10 rounded-2xl px-4 py-3">{error}</p>}
         <button type="submit" disabled={busy || !supabaseConfigured} className={primary}>
           {busy && <Loader2 className="w-5 h-5 animate-spin" />}
           {mode === 'signin' ? 'Sign in' : mode === 'signup' ? 'Create account' : 'Send reset link'}
@@ -203,8 +204,9 @@ function NewPassword({ welcome = false }: { welcome?: boolean }) {
             autoComplete="nickname"
           />
         )}
-        <input className={input} type="password" placeholder={welcome ? 'Password (8+ characters)' : 'New password (8+ characters)'} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" autoFocus={!welcome} />
-        {error && <p className="text-sm font-bold text-brand-200">{error}</p>}
+        <label className="block text-sm font-bold" htmlFor="new-password">{welcome ? "Choose a password" : "New password"}</label>
+        <input id="new-password" aria-describedby={error ? "account-error" : undefined} className={input} type="password" placeholder={welcome ? 'Password (8+ characters)' : 'New password (8+ characters)'} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" autoFocus={!welcome} />
+        {error && <p id="account-error" role="alert" className="text-sm font-bold text-brand-200">{error}</p>}
         <button type="submit" disabled={busy} className={primary}>
           {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <KeyRound className="w-5 h-5" />} {welcome ? 'Finish setting up' : 'Save password'}
         </button>
@@ -440,6 +442,7 @@ function SignedIn() {
         )}
       </section>
 
+      <Link to="/night" className="block my-5 font-bold text-brand-300 underline">My saved night out →</Link>
       <ActivitySharingToggle />
     </div>
   );
@@ -473,6 +476,7 @@ export default function Account() {
       )}
       <SignedOut />
       <div className="w-full max-w-md mx-auto px-4 pb-10">
+        <Link to="/night" className="block my-5 font-bold text-brand-300 underline">My saved night out →</Link>
         <ActivitySharingToggle />
       </div>
     </>

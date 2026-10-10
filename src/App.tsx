@@ -12,6 +12,7 @@ import Explore from '@/pages/Explore';
 // Leaflet-heavy pages and the admin console load on demand, so the first
 // paint of the directory stays light. Admin code never ships to visitors
 // unless they open /admin.
+const NightPage = lazy(() => import('@/pages/NightPage'));
 const MapPage = lazy(() => import('@/pages/MapPage'));
 const VenuePage = lazy(() => import('@/pages/VenuePage'));
 const EventsPage = lazy(() => import('@/pages/EventsPage'));
@@ -54,6 +55,7 @@ export default function App() {
                   <Route path="events" element={<EventsPage />} />
                   <Route path="events/:id" element={<EventPage />} />
                   <Route path="community" element={<Community />} />
+                  <Route path="night" element={<NightPage />} />
                   <Route path="account" element={<Account />} />
                 </Route>
                 <Route path="admin/*" element={<AdminApp />} />

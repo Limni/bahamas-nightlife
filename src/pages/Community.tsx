@@ -4,7 +4,7 @@ import { CheckCircle2, Heart, ImagePlus, Loader2, PartyPopper, Search, Send, Spa
 import { supabase, supabaseConfigured } from '@/lib/supabase';
 import { useDirectory } from '@/lib/directory';
 import { useAuth } from '@/lib/auth';
-import { uploadSubmissionPhoto } from '@/lib/images';
+import { compressImage } from '@/lib/images';
 import type { SubmissionKind } from '@/lib/types';
 import { Chip } from '@/components/ui';
 import { SetupNotice } from '@/components/SetupNotice';
@@ -45,7 +45,7 @@ function contributionText(c: Contribution) {
   }
 }
 
-/** Client-side courtesy throttle (the real guard is the DB constraints + storage limits). */
+/** Courtesy throttle; the Edge Function and database enforce the real quota. */
 function recentlySent(): number[] {
   try {
     const list = JSON.parse(localStorage.getItem(RATE_KEY) ?? '[]') as number[];
@@ -90,6 +90,7 @@ function VenuePicker({ value, onChange }: { value: string | null; onChange: (id:
           }}
           onFocus={() => setOpen(true)}
           onBlur={() => setTimeout(() => setOpen(false), 150)}
+          aria-label="Search for a venue"
           placeholder="Which spot?"
           className="flex-1 bg-transparent outline-none font-semibold text-night-50 placeholder:text-night-400"
         />
@@ -130,6 +131,12 @@ export default function Community() {
   const [venueName, setVenueName] = useState('');
   const [fields, setFields] = useState<string[]>(initialField ? [initialField] : []);
   const [message, setMessage] = useState('');
+  const [eventTitle, setEventTitle] = useState('');
+  const [eventStart, setEventStart] = useState('');
+  const [eventEnd, setEventEnd] = useState('');
+  const [eventPlace, setEventPlace] = useState('');
+  const [eventLink, setEventLink] = useState('');
+  const request = useRef<{ fingerprint: string; id: string } | null>(null);
   const [photos, setPhotos] = useState<{ file: File; preview: string }[]>([]);
   const [contactName, setContactName] = useState('');
   const [contactEmail, setContactEmail] = useState('');
@@ -164,6 +171,7 @@ export default function Community() {
   const reset = () => {
     setStatus('idle');
     setMessage('');
+    setEventTitle(''); setEventStart(''); setEventEnd(''); setEventPlace(''); setEventLink(''); request.current = null;
     photos.forEach((p) => URL.revokeObjectURL(p.preview));
     setPhotos([]);
     setFields([]);
@@ -177,27 +185,41 @@ export default function Community() {
     if (honeypot) return setStatus('sent'); // bots fill hidden fields
     if (needsVenue && !venueId) return setError('Pick the spot this is about.');
     if (kind === 'new_spot' && !venueName.trim()) return setError('What’s the name of the spot?');
-    if (!message.trim()) return setError('Add a short note so we know what to change.');
+    if (kind === 'event' && (!eventTitle.trim() || !eventStart || !eventEnd || eventEnd <= eventStart || (!venueId && !eventPlace.trim()))) return setError('Add the event title, location, and an end time after the start. Times are in Nassau.');
+    if (!message.trim() && kind !== 'event') return setError('Add a short note so we know what to change.');
     const sent = recentlySent();
     if (sent.length >= 6) return setError('Thanks for all the help! Please try again in a little while.');
 
     setStatus('sending');
     try {
-      const photo_paths: string[] = [];
-      for (const p of photos) photo_paths.push(await uploadSubmissionPhoto(p.file));
-      const { error: insertError } = await supabase.from('submissions').insert({
+      const details = kind === 'event' ? `Event: ${eventTitle.trim()}\nStarts (Nassau): ${eventStart}\nEnds (Nassau): ${eventEnd}\nLocation: ${eventPlace.trim() || 'Selected venue'}\nTickets/info: ${eventLink.trim() || 'None'}\n\n${message.trim()}` : message.trim();
+      if (details.length > 2000) throw new Error('Please shorten the details to fit the event information.');
+      const payload = {
         kind,
         venue_id: needsVenue || kind === 'other' || kind === 'event' ? venueId : null,
         venue_name: kind === 'new_spot' ? venueName.trim() : null,
         fields: kind === 'update' ? fields : [],
-        message: message.trim(),
+        message: details,
         contact_name: (session ? profile?.display_name : contactName.trim()) || null,
         contact_email: (session ? session.user.email : contactEmail.trim()) || null,
         credit_ok: creditOk,
-        photo_paths,
-      });
-      if (insertError) throw insertError;
-      localStorage.setItem(RATE_KEY, JSON.stringify([...sent, Date.now()]));
+      };
+      const fingerprint = JSON.stringify(payload) + photos.map(p => `${p.file.name}:${p.file.size}:${p.file.lastModified}`).join('|');
+      if (request.current?.fingerprint !== fingerprint) request.current = { fingerprint, id: crypto.randomUUID() };
+      const body = new FormData();
+      body.set('request_id', request.current.id);
+      body.set('suggestion', JSON.stringify(payload));
+      for (const photo of photos) body.append('photos', await compressImage(photo.file,1600,0.78), 'photo');
+      const { data, error: sendError } = await supabase.functions.invoke('submit-suggestion', { body });
+      if (sendError) {
+        let detail = 'Could not send. Please wait two minutes and try again.';
+        if ('context' in sendError && sendError.context instanceof Response) {
+          try { detail = (await sendError.context.json()).error || detail; } catch { /* use friendly fallback */ }
+        }
+        throw new Error(detail);
+      }
+      if (!data?.id) throw new Error(data?.error || 'Could not confirm your suggestion. Please try again.');
+      try { localStorage.setItem(RATE_KEY, JSON.stringify([...sent, Date.now()])); } catch { /* The suggestion already succeeded. */ }
       setStatus('sent');
     } catch (err) {
       setStatus('idle');
@@ -284,6 +306,17 @@ export default function Community() {
                   </div>
                 </div>
               )}
+
+              {kind === 'event' && <fieldset className="space-y-3">
+                <legend className="font-bold text-white">Event details — Nassau time</legend>
+                <label className="block text-sm font-bold">Event title<input required maxLength={120} value={eventTitle} onChange={e=>setEventTitle(e.target.value)} className="mt-1 w-full p-3 rounded-xl bg-night-950 border border-white/10" /></label>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <label className="block text-sm font-bold">Starts<input required type="datetime-local" value={eventStart} onChange={e=>setEventStart(e.target.value)} className="mt-1 w-full min-w-0 p-3 rounded-xl bg-night-950 border border-white/10" /></label>
+                  <label className="block text-sm font-bold">Ends<input required type="datetime-local" value={eventEnd} onChange={e=>setEventEnd(e.target.value)} className="mt-1 w-full min-w-0 p-3 rounded-xl bg-night-950 border border-white/10" /></label>
+                </div>
+                <label className="block text-sm font-bold">Location or address{venueId ? ' (optional)' : ''}<input required={!venueId} maxLength={200} value={eventPlace} onChange={e=>setEventPlace(e.target.value)} className="mt-1 w-full p-3 rounded-xl bg-night-950 border border-white/10" /></label>
+                <label className="block text-sm font-bold">Tickets / information link (optional)<input type="url" maxLength={300} value={eventLink} onChange={e=>setEventLink(e.target.value)} placeholder="https://" className="mt-1 w-full p-3 rounded-xl bg-night-950 border border-white/10" /></label>
+              </fieldset>}
 
               {kind === 'update' && (
                 <div>

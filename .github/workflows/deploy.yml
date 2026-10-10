@@ -6,10 +6,12 @@ name: Build & Deploy
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
-  group: deploy-nassaunights
+  group: deploy-nassaunights-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -17,8 +19,29 @@ env:
   IMAGE_NAME: ghcr.io/limni/bahamas-nightlife
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+        env:
+          VITE_SUPABASE_URL: https://preview.supabase.co
+          VITE_SUPABASE_ANON_KEY: preview-only
+          PRERENDER_SKIP_DATA: '1'
+
   # --- Heavy lifting on a GitHub-hosted runner -------------------------------
   build:
+    needs: verify
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read

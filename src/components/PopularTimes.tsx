@@ -1,3 +1,4 @@
+import { ActivityStatus } from './ActivityStatus';
 import { useMemo, useState } from 'react';
 import { BarChart3 } from 'lucide-react';
 import { HEAT_META, heatFor, useActivity, usePopularTimes, VS_USUAL_TEXT } from '@/lib/activity';
@@ -41,7 +42,7 @@ export function PopularTimes({ venueId, now }: { venueId: string; now: number })
 
   if (!typical || !series) {
     return (
-      <div className="text-sm text-night-300">
+      <div className="text-sm text-night-300"><ActivityStatus />
         <p className="flex items-center gap-2 font-bold text-night-200">
           <BarChart3 className="w-4 h-4 text-brand-400" /> No crowd history yet
         </p>
@@ -56,6 +57,7 @@ export function PopularTimes({ venueId, now }: { venueId: string; now: number })
 
   return (
     <div>
+      <ActivityStatus />
       <div className="flex gap-1 overflow-x-auto no-scrollbar -mx-1 px-1 pb-3">
         {[1, 2, 3, 4, 5, 6, 0].map((d) => (
           <button

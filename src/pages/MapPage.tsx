@@ -1,3 +1,4 @@
+import { ActivityStatus } from '@/components/ActivityStatus';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Circle, useMap, useMapEvents } from 'react-leaflet';
@@ -354,6 +355,7 @@ export default function MapPage() {
               </span>
             )}
           </div>
+          <div className="px-3 rounded-xl bg-night-900/95"><ActivityStatus /></div>
           {locationError && (
             <div className="bg-rose-950/90 backdrop-blur-md text-rose-200 px-4 py-3 rounded-2xl flex items-start gap-3 border border-rose-400/30 shadow-lg">
               <Navigation className="w-5 h-5 mt-0.5 shrink-0" />

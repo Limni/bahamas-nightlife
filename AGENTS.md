@@ -11,7 +11,7 @@ Guidance for AI coding agents (and humans) working in this repository. Read this
 
 Everything else is Nassau Eats: directory, map, venue pages with drinks menus/photos/reviews, member accounts, community suggestions and the phone-friendly admin console. On top, admins can make members **venue managers** who update their own venues from `/manage`.
 
-It is a static React SPA with **no custom backend** (the one exception is a Supabase Edge Function, `invite-member`, for member invitations). All data, auth and file storage go through **its own Supabase project** (not Nassau Eats'), protected by Postgres row-level security (RLS). It is deployed as an nginx Docker container on the same VM as Island GO (port 5050) and Nassau Eats (5060), on port **5110**.
+It is a static React SPA with Supabase Edge Functions for member invitations (`invite-member`) and rate-limited community suggestions (`submit-suggestion`). All data, auth and file storage go through **its own Supabase project** (not Nassau Eats'), protected by Postgres row-level security (RLS). It is deployed as an nginx Docker container on the same VM as Island GO (port 5050) and Nassau Eats (5060), on port **5110**.
 
 - Repo: `https://github.com/Limni/bahamas-nightlife` (branch `main`)
 - Supabase project: a new one per `README.md` setup (fill `.env.local`; none is committed).
@@ -23,11 +23,12 @@ npm install
 npm run dev          # Vite dev server on http://localhost:3000 (all interfaces)
 npm run build        # production build -> dist/
 npm run preview      # serve dist/
+npm test             # regression + isolated PostgreSQL migration tests (Node 24)
 npm run lint         # type-check only (tsc --noEmit); there is no ESLint
 npm run seed:google  # import Google Places venues as drafts (see below)
 ```
 
-There is **no test suite**. To verify a change, run `npm run lint` and `npm run build`, then check it in a browser (see "Verifying UI changes").
+To verify a change, run `npm test`, `npm run lint` and `npm run build`, then check it in a browser (see "Verifying UI changes").
 
 ## Stack (versions matter)
 
@@ -216,7 +217,7 @@ Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > Dir
 | `venue_managers` | own rows (+ admins) | admins only |
 | `tags` | everyone | admins |
 | `site_settings` | everyone | admins update (no insert/delete; the row is seeded) |
-| `submissions` | admins | **anyone can insert**, but only as `status='new'` with no `admin_note`/`resolved_at` and `user_id` null or self; admins update/delete |
+| `submissions` | admins | **service-role Edge Function inserts** after validation and a database quota reservation; admins update/delete |
 | `profiles` | everyone (only `display_name` exists) | the owner updates their own (not while suspended); admins update any |
 | `events` | published for anyone; everything for admins; managers also see their venues' drafts | admins; managers insert/update/delete events whose `venue_id` is one of their venues (they can't move one elsewhere or create one without a venue) |
 | `presence` | nobody | only `report_presence()` / housekeeping (security definer) |
@@ -253,7 +254,7 @@ Only admins may change `reviews.is_hidden`. The `reviews_guard` trigger forces `
 ### Storage buckets
 
 - `venue-media` is **public read**; only admins can write. Paths are `<venue_id>/<gallery|menu>/<timestamp>-<rand>.<ext>` (event flyers: `events/<event_id>/…`), uploaded with a 1-year cache. A unique path per upload means replacing an image changes its URL.
-- `submission-uploads` is **private**. Anyone may upload into `inbox/` (8 MB max, images only); only admins can read (the admin Inbox uses signed URLs) or delete.
+- `submission-uploads` is **private**. Only the `submit-suggestion` Edge Function uploads into `inbox/` (8 MB max per photo); only admins can read (the admin Inbox uses signed URLs) or delete.
 
 ### Hours format
 
@@ -299,7 +300,7 @@ Ported from Island GO's map, on a dark basemap:
 
 ### Community (`/community`)
 - Suggestion types: new spot / update / closed / other, with a venue picker, "what changed" chips, details, and up to 6 photos (compressed, uploaded to the private bucket).
-- A hidden honeypot field silently drops bots, and a per-browser throttle allows 6 per hour.
+- A hidden honeypot and browser courtesy throttle help the UI. The `submit-suggestion` Edge Function enforces 6 requests per sender per hour and 120 globally through service-only SQL RPCs; retry IDs prevent duplicate suggestions. Deploy prerequisites are in `DEPLOY.md`.
 - Signed-in members don't type a name or email (both come from their account), and the suggestion is linked to their account.
 - Sidebar: count of applied suggestions and the "Community wins" feed.
 
@@ -491,6 +492,5 @@ There are no tests. A practical loop:
   - OAuth logins (Google/Apple);
   - review photos, replies, likes, and review reporting by visitors;
   - sponsorship payments/billing and analytics;
-  - automated tests;
   - an "Admin" link in the public nav (deliberately omitted);
   - multi-island support (Nassau / New Providence only; `NASSAU`, the tile precache bounds and the tag seeds assume it).

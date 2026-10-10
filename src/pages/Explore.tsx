@@ -1,3 +1,4 @@
+import { ActivityStatus } from '@/components/ActivityStatus';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -360,28 +361,28 @@ export default function Explore() {
     <div className="w-full max-w-6xl mx-auto px-4 md:px-6 pb-12">
       {/* ------------------------------------------------------------ Hero */}
       <section className="mt-4 md:mt-8">
-        <div className="neon-board relative rounded-[2rem] overflow-hidden text-white px-5 py-7 md:px-10 md:py-12 shadow-[0_24px_60px_rgba(0,0,0,0.55)]">
-          <div className="md:hidden mb-6">
+        <div className="neon-board relative rounded-[2rem] overflow-hidden text-white px-5 py-5 md:px-10 md:py-12 shadow-[0_24px_60px_rgba(0,0,0,0.55)]">
+          <div className="md:hidden mb-3">
             <Logo />
           </div>
           <div className="grid lg:grid-cols-[1.3fr_1fr] gap-8 items-center">
             <div>
               {theme.badge && (
-                <p className="mb-3 w-fit flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/15 text-xs font-extrabold text-white">
+                <p className="hidden md:flex mb-3 w-fit items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/15 text-xs font-extrabold text-white">
                   <theme.badge.icon className="w-3.5 h-3.5 text-glow-300" /> {theme.badge.label}
                 </p>
               )}
-              <p className="inline-flex items-center gap-2 text-xs md:text-sm font-extrabold uppercase tracking-[0.16em] text-glow-300">
+              <p className="hidden md:inline-flex items-center gap-2 text-xs md:text-sm font-extrabold uppercase tracking-[0.16em] text-glow-300">
                 <Moon className="w-4 h-4" /> {m.greeting}
               </p>
-              <h1 className="font-display mt-3 text-[2.2rem] leading-[1.05] md:text-6xl font-extrabold tracking-tight">
+              <h1 className="font-display mt-3 text-[1.75rem] leading-[1.05] md:text-6xl font-extrabold tracking-tight">
                 Nassau <span className="text-brand-300 neon-text neon-flicker">after dark.</span>
               </h1>
               <p className="mt-3 md:text-lg font-medium text-night-200 max-w-xl">
-                Bars, clubs, beach bars and tonight’s events across New Providence — with live levels showing where it’s buzzing right now.
+                <span className="md:hidden">Find your spot. Plan tonight.</span><span className="hidden md:inline">Bars, clubs, beach bars and tonight’s events across New Providence — with live levels showing where it’s buzzing right now.</span>
               </p>
 
-              <div className="mt-6 max-w-xl">
+              <div className="mt-4 md:mt-6 max-w-xl">
                 <SearchFilterBar onOpenFilters={() => setFiltersOpen(true)} />
               </div>
 
@@ -414,7 +415,7 @@ export default function Explore() {
                 )}
               </div>
 
-              <dl className="mt-8 grid grid-cols-4 gap-2 max-w-lg">
+              <dl className="hidden md:grid mt-8 grid-cols-4 gap-2 max-w-lg">
                 {stats.map((s) => (
                   <div key={s.label} className="border-l-2 border-brand-400/60 pl-3">
                     <dt className="sr-only">{s.label}</dt>
@@ -427,7 +428,7 @@ export default function Explore() {
               {supabaseConfigured && consent === null && !location && (
                 <button
                   onClick={lightUp}
-                  className="mt-6 w-full max-w-lg flex items-center gap-3 p-3 pr-4 rounded-2xl bg-white/5 border border-white/15 hover:bg-white/10 text-left"
+                  className="hidden md:flex mt-6 w-full max-w-lg items-center gap-3 p-3 pr-4 rounded-2xl bg-white/5 border border-white/15 hover:bg-white/10 text-left"
                 >
                   <span className="w-10 h-10 shrink-0 rounded-xl bg-brand-500/20 text-brand-300 flex items-center justify-center">
                     <Radio className="w-5 h-5" />
@@ -445,6 +446,10 @@ export default function Explore() {
         </div>
       </section>
 
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <ActivityStatus />
+        <Link to="/night" className="text-sm font-extrabold text-brand-300 underline">My night out →</Link>
+      </div>
       {!supabaseConfigured && <SetupNotice />}
       {error && (
         <p className="mt-4 text-sm font-semibold text-rose-200 bg-rose-500/10 border border-rose-400/30 rounded-2xl px-4 py-3">
@@ -456,7 +461,7 @@ export default function Explore() {
         <>
           {/* ------------------------------------------------ Events tonight */}
           {(tonight.length > 0 || upcoming.length > 0) && (
-            <section className="mt-10">
+            <section className="mt-6 md:mt-10">
               <SectionHeader
                 eyebrow={tonight.some((e) => isEventLive(e, now)) ? 'Live now' : 'Highlighted events'}
                 title={tonight.length > 0 ? 'Happening tonight' : 'Coming up'}

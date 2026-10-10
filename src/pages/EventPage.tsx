@@ -1,3 +1,5 @@
+import { eventCalendar } from '@/lib/calendar';
+import { SaveNight } from '@/components/SaveNight';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { MapContainer, Marker, TileLayer } from 'react-leaflet';
@@ -39,6 +41,7 @@ export default function EventPage() {
   useEffect(() => {
     let alive = true;
     setNotFound(false);
+    setFetched(null);
     supabase
       .from('events')
       .select('*')
@@ -89,6 +92,13 @@ export default function EventPage() {
   // A weekly run's last night: its end instant falls in the small hours after it.
   const lastNight = e.end_date ? new Date(new Date(e.end_date).getTime() - 43_200_000).toISOString() : null;
 
+  const calendar = eventCalendar(e, venue, now);
+  const downloadCalendar = () => {
+    if (!calendar) return;
+    const url = URL.createObjectURL(new Blob([calendar], { type: 'text/calendar;charset=utf-8' }));
+    const a = document.createElement('a'); a.href = url; a.download = 'nassau-night.ics'; a.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   const share = async () => {
     const url = window.location.href.split('?')[0];
     try {
@@ -147,6 +157,8 @@ export default function EventPage() {
             </div>
           )}
 
+          <SaveNight kind="events" id={e.id} />
+          {calendar && <button type="button" onClick={downloadCalendar} className="mt-3 px-4 py-3 rounded-xl border border-white/15 text-brand-200 font-bold text-sm">Add to calendar</button>}
           <div className="grid grid-cols-2 sm:flex gap-2 mt-5">
             {pos && (
               <a

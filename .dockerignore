@@ -18,4 +18,5 @@ deploy.sh
 supabase
 *.png
 !public/**/*.png
-scripts
+scripts/*
+!scripts/prerender.mjs

@@ -6,7 +6,8 @@
 // and usually no end_date. Sorting and "tonight" use the next session, not
 // start_date, which for a long-running weekly night is months in the past.
 
-import { DAY_NAMES, dayLabel, formatTime, hasHours, nassauClock, openState, timeToMinutes, todayIndex, type WeeklyHours } from './hours';
+import { DAY_NAMES, dayLabel, formatTime, hasHours, openState, todayIndex, type WeeklyHours } from './hours';
+import { addDays, nassauDate, nassauInstant } from './nassauTime';
 import type { NightEvent, Venue } from './types';
 
 const DAY_MS = 86_400_000;
@@ -55,15 +56,17 @@ export function nextSession(e: NightEvent, now = Date.now()): { at: number; open
   if (!hasHours(e.hours)) return now <= end ? { at: Math.max(start, now), opensAt: null } : null;
   const t = Math.max(now, start);
   if (t > end) return null;
-  const s = openState(e.hours, t);
-  if (s.kind === 'open') return { at: t, opensAt: null };
-  if (s.kind !== 'closed' || s.opensDay === null || !s.opensAt) return null;
-  const { dow, minutes } = nassauClock(t);
-  const open = timeToMinutes(s.opensAt) ?? 0;
-  let days = (s.opensDay - dow + 7) % 7;
-  if (days === 0 && open <= minutes) days = 7;
-  const at = t + (days * 1440 + open - minutes) * 60_000;
-  return at <= end ? { at, opensAt: s.opensAt } : null;
+  if (openState(e.hours, t).kind === 'open') return { at: t, opensAt: null };
+  // Calendar days have 23/25 hours at DST boundaries; never add fixed day milliseconds.
+  for (let days = 0; days <= 14; days++) {
+    const date = addDays(nassauDate(t), days);
+    const day = new Date(`${date}T12:00:00Z`).getUTCDay();
+    const window = e.hours[String(day)];
+    if (!window) continue;
+    const at = nassauInstant(date, window.open);
+    if (at !== null && at >= t && at <= end) return { at, opensAt: window.open };
+  }
+  return null;
 }
 
 /** When the next session starts (Infinity when none is left); the sort key for upcoming lists. */
@@ -110,7 +113,7 @@ export function eventWhen(e: NightEvent, now = Date.now()): string {
   }
 
   const today = nassauDay(now);
-  const tomorrow = nassauDay(now + DAY_MS);
+  const tomorrow = nassauDay(Date.parse(`${addDays(nassauDate(now), 1)}T12:00:00Z`));
 
   if (isRecurring(e)) {
     const pattern = recurrenceLabel(e.hours);
