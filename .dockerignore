@@ -18,4 +18,6 @@ deploy.sh
 supabase
 *.png
 !public/**/*.png
-scripts
+# The importer stays out of the image; the sitemap generator runs in `npm run build`.
+scripts/*
+!scripts/sitemap.mjs
