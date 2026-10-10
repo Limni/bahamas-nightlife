@@ -86,6 +86,7 @@ src/
     VenueDrawer.tsx        DraggableSheet (shared map bottom sheet) + VenueDrawer
     EventDrawer.tsx        map sheet for an event pin
     PopularTimes.tsx       per-night usual-crowd bar chart with tonight's live level
+    TabBar.tsx             pill tabs that scroll sideways when they don't fit, with edge arrows (venue page)
     MenuList.tsx           MenuSections (a drinks or food menu: item photos, hearts, Fan favourite),
                            useMenuLikes, LikeSignInPrompt
     ActivityConsent.tsx    one-time opt-in card, Account toggle, "You're at X" banner

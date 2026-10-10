@@ -18,6 +18,7 @@ import { compareEvents, isEventEnded } from '@/lib/events';
 import { Lightbox, type LightboxImage } from '@/components/Lightbox';
 import { EmptyState, HeatBadge, OpenBadge, Price, SafeImg, Spinner, Stars } from '@/components/ui';
 import { ReviewsSection } from '@/components/Reviews';
+import { TabBar } from '@/components/TabBar';
 import { LikeSignInPrompt, MenuSections, useMenuLikes } from '@/components/MenuList';
 import { PopularTimes } from '@/components/PopularTimes';
 import { EventCard } from '@/components/EventCard';
@@ -286,20 +287,7 @@ export default function VenuePage() {
 
         {/* Tabs */}
         <div className="sticky top-0 md:top-16 z-[900] -mx-4 px-4 md:mx-0 md:px-0 mt-5 py-2 bg-night-950/90 backdrop-blur-md">
-          <div className="flex gap-1 bg-night-900 rounded-2xl p-1 border border-white/10 w-full sm:w-fit">
-            {tabs.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={`flex-1 sm:flex-none px-2.5 sm:px-5 py-2.5 rounded-xl text-sm font-extrabold transition-colors ${
-                  tab === t.key ? 'bg-brand-500 text-white' : 'text-night-200 hover:bg-white/5'
-                }`}
-              >
-                {t.label}
-                {t.count ? <span className={`ml-1.5 text-xs ${tab === t.key ? 'text-brand-100' : 'text-night-400'}`}>{t.count}</span> : null}
-              </button>
-            ))}
-          </div>
+          <TabBar tabs={tabs} active={tab} onChange={setTab} />
         </div>
 
         <div className="mt-4">
