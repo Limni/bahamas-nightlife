@@ -18,6 +18,7 @@ export interface Venue {
   lng: number | null;
   hours: WeeklyHours | null;
   hours_note: string | null;
+  visit_notes?: Partial<Record<'dress_code' | 'age_policy' | 'parking' | 'accessibility' | 'reservations' | 'happy_hour', string>>;
   cover_url: string | null;
   /** Activity geofence around the pin, metres. */
   radius_m: number;

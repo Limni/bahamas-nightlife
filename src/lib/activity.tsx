@@ -3,6 +3,8 @@ import { supabase, supabaseConfigured } from './supabase';
 import { useUserLocation } from './directory';
 import { getDistance, NEW_PROVIDENCE } from './geo';
 import type { VenueActivity } from './types';
+import { useNow } from './useNow';
+import { activityIsFresh } from './activityFreshness';
 
 // ---------------------------------------------------------------------------
 // Live activity. Two halves:
@@ -124,7 +126,7 @@ export function heatFor(a: VenueActivity | undefined): Heat {
   const scale = Math.max(a?.peak_avg ?? 0, PEAK_FLOOR);
   const level = levelFor(live, scale);
   let vsUsual: VsUsual = null;
-  if (typical >= 1) {
+  if (live >= 2 && typical >= 1) {
     const ratio = live / typical;
     vsUsual = ratio > 1.3 ? 'busier' : ratio < 0.7 ? 'quieter' : 'usual';
   } else if (live >= 2) {
@@ -133,6 +135,7 @@ export function heatFor(a: VenueActivity | undefined): Heat {
   return {
     level,
     ...HEAT_META[level],
+    label: live < 2 ? 'Not enough live data' : HEAT_META[level].label,
     score: Math.min(1, live / scale),
     vsUsual,
     usual: a && a.peak_avg > 0 ? levelFor(Math.round(typical), scale) : null,
@@ -164,6 +167,8 @@ interface ActivityValue {
   isBusy: (venueId: string) => boolean;
   /** False until the first venue_activity() response (or a fresh cache). */
   loaded: boolean;
+  updatedAt: number | null;
+  available: boolean;
   consent: Consent;
   setConsent: (c: Exclude<Consent, null>) => void;
   /** The venue this device is currently counted at, if any. */
@@ -175,26 +180,42 @@ const ActivityContext = createContext<ActivityValue | null>(null);
 
 export function ActivityProvider({ children }: { children: ReactNode }) {
   const { location, enable } = useUserLocation();
-  const [activity, setActivity] = useState<Record<string, VenueActivity>>(readCache);
+  const [storedActivity, setActivity] = useState<Record<string, VenueActivity>>(readCache);
   const [loaded, setLoaded] = useState(() => Object.keys(readCache()).length > 0);
   const [consent, setConsentState] = useState<Consent>(readConsent);
   const [here, setHere] = useState<string | null>(null);
+
+  const now = useNow();
+  const [updatedAt, setUpdatedAt] = useState<number | null>(() => {
+    try { return JSON.parse(localStorage.getItem(CACHE_KEY) ?? 'null')?.at ?? null; } catch { return null; }
+  });
+  const [failed, setFailed] = useState(false);
+  const available = activityIsFresh(updatedAt, failed, now);
+  const activity = useMemo(() => available ? storedActivity : Object.fromEntries(
+    Object.entries(storedActivity).map(([id, row]) => [id, { ...row, live_count: 0 }]),
+  ), [storedActivity, available]);
 
   // ---- reading -----------------------------------------------------------
   const inFlight = useRef(false);
   const fetchActivity = useCallback(async () => {
     if (!supabaseConfigured || inFlight.current) return;
     inFlight.current = true;
-    const { data, error } = await supabase.rpc('venue_activity');
-    inFlight.current = false;
+    let response;
+    try { response = await supabase.rpc('venue_activity'); }
+    catch { setFailed(true); setLoaded(true); return; }
+    finally { inFlight.current = false; }
+    const { data, error } = response;
     // Before the activity schema is applied the RPC doesn't exist: show nothing.
     if (error || !data) {
+      setFailed(true);
       setLoaded(true);
       return;
     }
     const rows: Record<string, VenueActivity> = {};
     for (const row of data as VenueActivity[]) rows[row.venue_id] = row;
     setActivity(rows);
+    setUpdatedAt(Date.now());
+    setFailed(false);
     setLoaded(true);
     try {
       localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), rows }));
@@ -303,8 +324,8 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
   const isBusy = useCallback((venueId: string) => (activity[venueId]?.live_count ?? 0) > 0, [activity]);
 
   const value = useMemo(
-    () => ({ activity, heatOf, isBusy, loaded, consent, setConsent, here, refresh: fetchActivity }),
-    [activity, heatOf, isBusy, loaded, consent, setConsent, here, fetchActivity],
+    () => ({ activity, heatOf, isBusy, loaded, updatedAt, available, consent, setConsent, here, refresh: fetchActivity }),
+    [activity, heatOf, isBusy, loaded, updatedAt, available, consent, setConsent, here, fetchActivity],
   );
   return <ActivityContext.Provider value={value}>{children}</ActivityContext.Provider>;
 }

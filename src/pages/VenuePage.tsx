@@ -1,3 +1,5 @@
+import { SaveNight } from '@/components/SaveNight';
+import { phoneHref } from '@/lib/phone';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { MapContainer, Marker, TileLayer } from 'react-leaflet';
@@ -265,9 +267,10 @@ export default function VenuePage() {
             </button>
           </div>
 
+          <SaveNight kind="venues" id={r.id} />
           <div className="grid grid-cols-3 sm:flex gap-2 mt-5">
             {r.phone && (
-              <a href={`tel:${r.phone.replace(/[^\d+]/g, '')}`} className="flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 px-4 py-3 rounded-2xl bg-emerald-400/10 border border-emerald-400/25 text-emerald-300 font-extrabold text-sm hover:border-emerald-400/50">
+              <a href={phoneHref(r.phone)} className="flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 px-4 py-3 rounded-2xl bg-emerald-400/10 border border-emerald-400/25 text-emerald-300 font-extrabold text-sm hover:border-emerald-400/50">
                 <Phone className="w-5 h-5" /> Call
               </a>
             )}
@@ -334,6 +337,17 @@ export default function VenuePage() {
                     )}
                   </Card>
                 )}
+
+                {r.visit_notes && Object.values(r.visit_notes).some(Boolean) && <Card title="Plan your visit" icon={<MapPin className="w-4 h-4" />}>
+                  <dl className="space-y-3">
+                    {r.visit_notes.dress_code && <div><dt className="font-bold text-night-100">Dress code</dt><dd className="text-night-200 whitespace-pre-line">{r.visit_notes.dress_code}</dd></div>}
+                    {r.visit_notes.age_policy && <div><dt className="font-bold text-night-100">Age policy</dt><dd className="text-night-200 whitespace-pre-line">{r.visit_notes.age_policy}</dd></div>}
+                    {r.visit_notes.parking && <div><dt className="font-bold text-night-100">Parking</dt><dd className="text-night-200 whitespace-pre-line">{r.visit_notes.parking}</dd></div>}
+                    {r.visit_notes.accessibility && <div><dt className="font-bold text-night-100">Accessibility</dt><dd className="text-night-200 whitespace-pre-line">{r.visit_notes.accessibility}</dd></div>}
+                    {r.visit_notes.reservations && <div><dt className="font-bold text-night-100">Reservations / WhatsApp</dt><dd className="text-night-200 whitespace-pre-line">{r.visit_notes.reservations}</dd></div>}
+                    {r.visit_notes.happy_hour && <div><dt className="font-bold text-night-100">Happy hour</dt><dd className="text-night-200 whitespace-pre-line">{r.visit_notes.happy_hour}</dd></div>}
+                  </dl>
+                </Card>}
 
                 {gallery.length > 0 && (
                   <Card title="Photos" icon={<Camera className="w-4 h-4" />}>
@@ -434,7 +448,7 @@ export default function VenuePage() {
                     <ul className="space-y-2.5 text-sm font-bold">
                       {r.phone && (
                         <li>
-                          <a href={`tel:${r.phone.replace(/[^\d+]/g, '')}`} className="flex items-center gap-2 text-night-100 hover:text-brand-200">
+                          <a href={phoneHref(r.phone)} className="flex items-center gap-2 text-night-100 hover:text-brand-200">
                             <Phone className="w-4 h-4 text-brand-400" /> {r.phone}
                           </a>
                         </li>

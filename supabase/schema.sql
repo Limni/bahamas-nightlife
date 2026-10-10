@@ -1590,3 +1590,75 @@ $$;
 
 revoke execute on function public.admin_venue_managers(uuid) from public, anon;
 grant execute on function public.admin_venue_managers(uuid) to authenticated;
+
+-- Review improvements: suggestions pass through a bounded, rate-limited Edge
+-- Function. Apply this with the new function and frontend as one rollout.
+drop policy if exists "Anyone can submit suggestions" on public.submissions;
+drop policy if exists "Anyone can upload suggestion photos" on storage.objects;
+
+create table if not exists public.suggestion_requests (
+  id uuid primary key,
+  rate_key text not null,
+  fingerprint text not null,
+  created_at timestamptz not null default now(),
+  leased_at timestamptz not null default now(),
+  completed boolean not null default false
+);
+alter table public.suggestion_requests enable row level security;
+create index if not exists suggestion_requests_rate_idx on public.suggestion_requests (rate_key, created_at);
+create index if not exists suggestion_requests_created_idx on public.suggestion_requests (created_at);
+
+create or replace function public.reserve_suggestion(p_id uuid, p_key text, p_fingerprint text)
+returns text language plpgsql security definer set search_path = public as $$
+declare previous public.suggestion_requests;
+begin
+  -- Serializes concurrent reservations, so neither per-sender nor global caps race.
+  perform pg_advisory_xact_lock(hashtextextended('suggestion-reservations',0));
+  select * into previous from public.suggestion_requests where id = p_id for update;
+  if found then
+    if previous.rate_key <> p_key or previous.fingerprint <> p_fingerprint then return 'conflict'; end if;
+    if previous.completed then return 'done'; end if;
+    if previous.leased_at > now() - interval '2 minutes' then return 'wait'; end if;
+    update public.suggestion_requests set leased_at = now() where id = p_id;
+    return 'ready';
+  end if;
+  if (select count(*) from public.suggestion_requests where rate_key = p_key and created_at > now() - interval '1 hour') >= 6
+     or (select count(*) from public.suggestion_requests where created_at > now() - interval '1 hour') >= 120 then
+    return 'limit';
+  end if;
+  insert into public.suggestion_requests (id,rate_key,fingerprint) values (p_id,p_key,p_fingerprint);
+  return 'ready';
+end;
+$$;
+
+create or replace function public.finish_suggestion(p_id uuid, p_key text, p_fingerprint text, p_payload jsonb)
+returns void language plpgsql security definer set search_path = public as $$
+declare previous public.suggestion_requests;
+begin
+  select * into previous from public.suggestion_requests where id = p_id for update;
+  if not found or previous.rate_key <> p_key or previous.fingerprint <> p_fingerprint then raise exception 'Invalid reservation'; end if;
+  if previous.completed then return; end if;
+  insert into public.submissions (id,kind,venue_id,venue_name,fields,message,contact_name,contact_email,credit_ok,photo_paths,user_id)
+  values (p_id,p_payload->>'kind',(p_payload->>'venue_id')::uuid,p_payload->>'venue_name',
+    array(select jsonb_array_elements_text(p_payload->'fields')),p_payload->>'message',p_payload->>'contact_name',
+    p_payload->>'contact_email',(p_payload->>'credit_ok')::boolean,array(select jsonb_array_elements_text(p_payload->'photo_paths')),
+    (p_payload->>'user_id')::uuid);
+  update public.suggestion_requests set completed = true where id = p_id;
+end;
+$$;
+revoke all on public.suggestion_requests from public, anon, authenticated;
+revoke execute on function public.reserve_suggestion(uuid,text,text) from public,anon,authenticated;
+revoke execute on function public.finish_suggestion(uuid,text,text,jsonb) from public,anon,authenticated;
+grant execute on function public.reserve_suggestion(uuid,text,text) to service_role;
+grant execute on function public.finish_suggestion(uuid,text,text,jsonb) to service_role;
+
+-- Optional venue-confirmed practical information, editable by existing managers.
+alter table public.venues add column if not exists visit_notes jsonb not null default '{}'::jsonb;
+create or replace function public.valid_visit_notes(notes jsonb)
+returns boolean language sql immutable as $$
+  select case when jsonb_typeof(notes) <> 'object' then false else octet_length(notes::text) <= 8192
+    and not exists (select 1 from jsonb_each(notes) n where n.key not in ('dress_code','age_policy','parking','accessibility','reservations','happy_hour')
+      or jsonb_typeof(n.value) <> 'string' or char_length(n.value #>> '{}') > 300) end;
+$$;
+alter table public.venues drop constraint if exists venues_visit_notes_valid;
+alter table public.venues add constraint venues_visit_notes_valid check (public.valid_visit_notes(visit_notes));

@@ -32,6 +32,7 @@ interface Form {
   radius_m: number;
   hours: WeeklyHours;
   hours_note: string;
+  visit_notes: NonNullable<Venue['visit_notes']>;
   is_published: boolean;
   is_featured: boolean;
   featured_until: string; // yyyy-mm-dd or ''
@@ -54,6 +55,7 @@ const toForm = (r: Venue): Form => ({
   radius_m: r.radius_m ?? 60,
   hours: r.hours ?? {},
   hours_note: r.hours_note ?? '',
+  visit_notes: r.visit_notes ?? {},
   is_published: r.is_published,
   is_featured: r.is_featured,
   featured_until: r.featured_until ? r.featured_until.slice(0, 10) : '',
@@ -167,6 +169,7 @@ export default function VenueEditor() {
         lng: f.location?.lng ?? null,
         hours: Object.keys(f.hours).length ? f.hours : null,
         hours_note: orNull(f.hours_note),
+        visit_notes: f.visit_notes,
       })
       .eq('id', venue.id)
       .select('*')
@@ -374,6 +377,18 @@ export default function VenueEditor() {
           Highlight a DJ night, live band or party at this spot. It glows on the map while it’s on. See all in{' '}
           <Link to={`${base}/events`} className="font-extrabold text-brand-700 hover:underline">Events</Link>.
         </p>
+      </Panel>
+
+      <Panel title="Plan your visit" id="visit">
+        <p className="mb-4 text-sm text-slate-600">Add only details confirmed with the venue. Leave unknown information blank.</p>
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="Dress code"><input className={inputClass} maxLength={300} value={form.visit_notes.dress_code ?? ''} onChange={e => set('visit_notes', { ...form.visit_notes, dress_code: e.target.value })} /></Field>
+          <Field label="Age policy"><input className={inputClass} maxLength={300} value={form.visit_notes.age_policy ?? ''} onChange={e => set('visit_notes', { ...form.visit_notes, age_policy: e.target.value })} /></Field>
+          <Field label="Parking"><input className={inputClass} maxLength={300} value={form.visit_notes.parking ?? ''} onChange={e => set('visit_notes', { ...form.visit_notes, parking: e.target.value })} /></Field>
+          <Field label="Accessibility"><input className={inputClass} maxLength={300} value={form.visit_notes.accessibility ?? ''} onChange={e => set('visit_notes', { ...form.visit_notes, accessibility: e.target.value })} /></Field>
+          <Field label="Reservations / WhatsApp"><input className={inputClass} maxLength={300} value={form.visit_notes.reservations ?? ''} onChange={e => set('visit_notes', { ...form.visit_notes, reservations: e.target.value })} /></Field>
+          <Field label="Happy hour"><input className={inputClass} maxLength={300} value={form.visit_notes.happy_hour ?? ''} onChange={e => set('visit_notes', { ...form.visit_notes, happy_hour: e.target.value })} /></Field>
+        </div>
       </Panel>
 
       <Panel title="Contact" id="contact">

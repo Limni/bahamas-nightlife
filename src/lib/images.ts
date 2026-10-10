@@ -1,4 +1,4 @@
-import { supabase, MEDIA_BUCKET, SUBMISSION_BUCKET } from './supabase';
+import { supabase, MEDIA_BUCKET } from './supabase';
 
 /**
  * Downscale + re-encode a photo in the browser before upload. Phone photos are
@@ -6,15 +6,15 @@ import { supabase, MEDIA_BUCKET, SUBMISSION_BUCKET } from './supabase';
  * mobile data are quick and pages stay fast. Re-encoding also strips EXIF
  * (including GPS), so read coordinates with readPhotoGps() *before* this.
  *
- * Falls back to the original file for formats the browser can't decode.
+ * Never upload the original: it may contain private EXIF/GPS metadata.
  */
 export async function compressImage(file: File, maxDim = 1800, quality = 0.82): Promise<Blob> {
-  if (!file.type.startsWith('image/') || file.type === 'image/gif' || file.type === 'image/svg+xml') return file;
+  if (!file.type.startsWith('image/') || file.type === 'image/svg+xml') throw new Error('Please choose a JPEG, PNG or WebP photo.');
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
   } catch {
-    return file; // e.g. HEIC on a browser that can't decode it
+    throw new Error('This photo cannot be processed safely. Please export it as JPEG, PNG or WebP and try again.');
   }
   const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
   const w = Math.round(bitmap.width * scale);
@@ -23,7 +23,7 @@ export async function compressImage(file: File, maxDim = 1800, quality = 0.82): 
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return file;
+  if (!ctx) { bitmap.close(); throw new Error('Photo processing is unavailable. Please try another browser.'); }
   ctx.drawImage(bitmap, 0, 0, w, h);
   bitmap.close();
 
@@ -31,7 +31,8 @@ export async function compressImage(file: File, maxDim = 1800, quality = 0.82): 
   // WebP is much smaller; Safari < 17 silently returns PNG for it, so check.
   let blob = await encode('image/webp');
   if (!blob || blob.type !== 'image/webp') blob = await encode('image/jpeg');
-  return blob && blob.size < file.size ? blob : file;
+  if (!blob || !['image/webp', 'image/jpeg'].includes(blob.type)) throw new Error('Could not prepare this photo. Please try another image.');
+  return blob;
 }
 
 const extFor = (blob: Blob, fallbackName: string) => {
@@ -59,18 +60,6 @@ export async function uploadMedia(file: File, folder: string): Promise<{ url: st
 export async function deleteMedia(path: string | null | undefined) {
   if (!path) return;
   await supabase.storage.from(MEDIA_BUCKET).remove([path]);
-}
-
-/** Community upload: compressed harder, lands in the private inbox folder. */
-export async function uploadSubmissionPhoto(file: File): Promise<string> {
-  const blob = await compressImage(file, 1600, 0.78);
-  const path = `inbox/${uniqueName()}.${extFor(blob, file.name)}`;
-  const { error } = await supabase.storage.from(SUBMISSION_BUCKET).upload(path, blob, {
-    contentType: blob.type || file.type || undefined,
-    upsert: false,
-  });
-  if (error) throw error;
-  return path;
 }
 
 /** GPS coordinates embedded in a photo's EXIF, if the device kept them. */

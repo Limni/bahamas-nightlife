@@ -1,3 +1,4 @@
+import { phoneHref } from '@/lib/phone';
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence, useMotionValue, animate } from 'motion/react';
@@ -181,7 +182,7 @@ export function VenueDrawer({
             {r.lat != null && r.lng != null && <DirectionsTile lat={r.lat} lng={r.lng} location={location} />}
             {r.phone && (
               <a
-                href={`tel:${r.phone.replace(/[^\d+]/g, '')}`}
+                href={phoneHref(r.phone)}
                 className="flex flex-col items-center justify-center px-3 rounded-2xl bg-emerald-400/10 border border-emerald-400/25 min-w-[64px] hover:border-emerald-400/50"
                 title={`Call ${r.phone}`}
               >

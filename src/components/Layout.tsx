@@ -1,3 +1,4 @@
+import { PageMetadata } from './PageMetadata';
 import { NavLink, Outlet, Link } from 'react-router-dom';
 import { CalendarHeart, Compass, Map as MapIcon, MessageSquareHeart, Sparkles, UserRound } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
@@ -46,6 +47,7 @@ export function Layout() {
   const { profile } = useAuth();
   return (
     <div className="min-h-dvh flex flex-col">
+      <PageMetadata />
       <header className="hidden md:block sticky top-0 z-[1500] h-16 bg-night-950/80 backdrop-blur-md border-b border-white/10">
         <div className="max-w-6xl mx-auto h-full px-6 flex items-center justify-between">
           <Logo />
