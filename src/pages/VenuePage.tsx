@@ -11,11 +11,12 @@ import { useDirectory } from '@/lib/directory';
 import { DAY_NAMES, dayLabel, hasHours, todayIndex } from '@/lib/hours';
 import { directionsUrl } from '@/lib/geo';
 import { pinIcon, pinStyleFor, TILE_ATTRIBUTION, TILE_URL } from '@/lib/markers';
-import { hasLocation, isFeatured, type MenuItem, type MenuKind, type Photo, type Venue } from '@/lib/types';
+import { hasLocation, isFeatured, isVideo, stillOf, type MenuItem, type MenuKind, type Photo, type Venue } from '@/lib/types';
 import { useNow } from '@/lib/useNow';
 import { useActivity } from '@/lib/activity';
 import { compareEvents, isEventEnded } from '@/lib/events';
 import { Lightbox, type LightboxImage } from '@/components/Lightbox';
+import { MediaStill, toLightbox } from '@/components/Media';
 import { EmptyState, HeatBadge, OpenBadge, Price, SafeImg, Spinner, Stars } from '@/components/ui';
 import { ReviewsSection } from '@/components/Reviews';
 import { TabBar } from '@/components/TabBar';
@@ -34,8 +35,8 @@ function PhotoGrid({ photos, onOpen }: { photos: Photo[]; onOpen: (i: number) =>
   return (
     <div className="columns-2 md:columns-3 gap-3 [&>*]:mb-3">
       {photos.map((p, i) => (
-        <button key={p.id} onClick={() => onOpen(i)} className="block w-full rounded-2xl overflow-hidden bg-white/5 break-inside-avoid group">
-          <img src={p.url} alt={p.caption ?? ''} loading="lazy" decoding="async" className="w-full h-auto group-hover:scale-[1.03] transition-transform duration-500" />
+        <button key={p.id} onClick={() => onOpen(i)} className="block w-full rounded-2xl overflow-hidden bg-white/5 break-inside-avoid group" aria-label={isVideo(p) ? 'Play video' : undefined}>
+          <MediaStill m={p} natural className="group-hover:scale-[1.03] transition-transform duration-500" />
         </button>
       ))}
     </div>
@@ -130,10 +131,18 @@ export default function VenuePage() {
     );
   }
 
-  const hero = r.cover_url ?? gallery[0]?.url ?? null;
+  // Never a video file as the hero image: the first photo, else a video's poster.
+  const hero = r.cover_url ?? gallery.find((p) => !isVideo(p))?.url ?? gallery.map(stillOf).find(Boolean) ?? null;
+  const videoCount = gallery.filter(isVideo).length;
+  const galleryLabel = [
+    gallery.length > videoCount && `${gallery.length - videoCount} photo${gallery.length - videoCount === 1 ? '' : 's'}`,
+    videoCount > 0 && `${videoCount} video${videoCount === 1 ? '' : 's'}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
   const today = todayIndex(now);
   const openPhotos = (list: Photo[], index: number) =>
-    setLightbox({ images: list.map((p) => ({ url: p.url, caption: p.caption })), index });
+    setLightbox({ images: list.map(toLightbox), index });
 
   const share = async () => {
     const url = window.location.href.split('?')[0];
@@ -215,7 +224,7 @@ export default function VenuePage() {
             onClick={() => setTab('photos')}
             className="absolute bottom-4 right-4 inline-flex items-center gap-1.5 px-3 py-2 rounded-full bg-black/55 backdrop-blur text-white text-xs font-extrabold hover:bg-black/70"
           >
-            <Camera className="w-4 h-4" /> {gallery.length} photos
+            <Camera className="w-4 h-4" /> {galleryLabel}
           </button>
         )}
       </div>
@@ -327,14 +336,14 @@ export default function VenuePage() {
                   <Card title="Photos" icon={<Camera className="w-4 h-4" />}>
                     <div className="grid grid-cols-3 gap-2">
                       {gallery.slice(0, 6).map((p, i) => (
-                        <button key={p.id} onClick={() => openPhotos(gallery, i)} className="aspect-square rounded-xl overflow-hidden bg-white/5">
-                          <img src={p.url} alt={p.caption ?? ''} loading="lazy" className="w-full h-full object-cover hover:scale-105 transition-transform" />
+                        <button key={p.id} onClick={() => openPhotos(gallery, i)} className="aspect-square rounded-xl overflow-hidden bg-white/5" aria-label={isVideo(p) ? 'Play video' : undefined}>
+                          <MediaStill m={p} className="w-full h-full hover:scale-105 transition-transform" />
                         </button>
                       ))}
                     </div>
                     {gallery.length > 6 && (
                       <button onClick={() => setTab('photos')} className="mt-3 text-sm font-extrabold text-brand-300 hover:text-night-100">
-                        See all {gallery.length} photos →
+                        See all {gallery.length} →
                       </button>
                     )}
                   </Card>

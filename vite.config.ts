@@ -10,6 +10,14 @@ export default defineConfig({
       '@': path.resolve(__dirname, 'src'),
     },
   },
+  // ffmpeg.wasm (admin video uploads) spawns its own module worker and loads
+  // its core by URL; pre-bundling would break both.
+  optimizeDeps: {
+    exclude: ['@ffmpeg/ffmpeg'],
+  },
+  worker: {
+    format: 'es',
+  },
   build: {
     rolldownOptions: {
       output: {

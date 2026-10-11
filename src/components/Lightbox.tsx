@@ -5,9 +5,12 @@ import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 export interface LightboxImage {
   url: string;
   caption?: string | null;
+  /** A short video: played with controls instead of shown as an image. */
+  video?: boolean;
+  poster?: string | null;
 }
 
-/** Full-screen photo viewer: arrows / swipe / keyboard to move, Esc to close. */
+/** Full-screen photo/video viewer: arrows / swipe / keyboard to move, Esc to close. */
 export function Lightbox({
   images,
   index,
@@ -47,7 +50,10 @@ export function Lightbox({
   return createPortal(
     <div
       className="fixed inset-0 z-[5000] bg-black/95 flex flex-col"
-      onTouchStart={(e) => (touchX.current = e.touches[0].clientX)}
+      onTouchStart={(e) => {
+        // Dragging along a video's controls (scrubbing) mustn't change slides.
+        touchX.current = (e.target as HTMLElement).tagName === 'VIDEO' ? null : e.touches[0].clientX;
+      }}
       onTouchEnd={(e) => {
         if (touchX.current === null) return;
         const dx = e.changedTouches[0].clientX - touchX.current;
@@ -64,13 +70,27 @@ export function Lightbox({
         </button>
       </div>
       <div className="flex-1 min-h-0 flex items-center justify-center px-2 relative" onClick={onClose}>
-        <img
-          key={img.url}
-          src={img.url}
-          alt={img.caption ?? ''}
-          className="max-w-full max-h-full object-contain select-none"
-          onClick={(e) => e.stopPropagation()}
-        />
+        {img.video ? (
+          <video
+            key={img.url}
+            src={img.url}
+            poster={img.poster ?? undefined}
+            controls
+            autoPlay
+            playsInline
+            preload="metadata"
+            className="max-w-full max-h-full object-contain bg-black"
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <img
+            key={img.url}
+            src={img.url}
+            alt={img.caption ?? ''}
+            className="max-w-full max-h-full object-contain select-none"
+            onClick={(e) => e.stopPropagation()}
+          />
+        )}
         {images.length > 1 && (
           <>
             <button
@@ -78,8 +98,8 @@ export function Lightbox({
                 e.stopPropagation();
                 prev();
               }}
-              className="hidden md:flex absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white items-center justify-center"
-              aria-label="Previous photo"
+              className={`${img.video ? 'flex' : 'hidden md:flex'} absolute left-2 md:left-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white items-center justify-center z-10`}
+              aria-label="Previous"
             >
               <ChevronLeft className="w-7 h-7" />
             </button>
@@ -88,8 +108,8 @@ export function Lightbox({
                 e.stopPropagation();
                 next();
               }}
-              className="hidden md:flex absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white items-center justify-center"
-              aria-label="Next photo"
+              className={`${img.video ? 'flex' : 'hidden md:flex'} absolute right-2 md:right-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white items-center justify-center z-10`}
+              aria-label="Next"
             >
               <ChevronRight className="w-7 h-7" />
             </button>

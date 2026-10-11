@@ -25,7 +25,7 @@ Nightlife for Nassau: bars, clubs, lounges, beach bars and tonight's events, on 
 | --- | --- |
 | `/` | Explore: neon hero with a live "busy right now" board, Happening tonight, Buzzing right now, Popular this month, venue types, vibes, neighbourhoods, and the full directory (sort by Buzzing, Popular, Top rated, Nearest…) |
 | `/map` | Dark map with category pins. **Heat halos** show live activity, and clusters glow with their busiest venue. **Live events pulse**, upcoming ones sit dimmed. Swipe-up cards for venues and events |
-| `/events`, `/events/:id` | Highlighted events: Live / Tonight / This week / Coming up, with flyer, schedule, venue, map and tickets |
+| `/events`, `/events/:id` | Highlighted events: Live / Tonight / This week / Coming up, with flyers and short videos, schedule, venue, map and tickets |
 | `/v/:slug` | Venue page: live level vs. usual, a **popular-times** chart, upcoming events there, hours, separate **drinks and food menus** (item photos, members ♥ their favourites), photos, reviews |
 | `/community` | Suggest a spot, report changes, or **tip us an event** |
 | `/manage` | **Venue manager**: members an admin has assigned to a venue update its details, hours, photos, menus and events (not publishing, reviews or likes) |
@@ -45,11 +45,11 @@ Spoofing is possible in principle: anyone can call the RPC with made-up coordina
 
 ## Events (from Island GO)
 
-An event has a start and end, optional weekly hours (for multi-day runs like a festival), a host venue (it uses that venue's pin) or its own location, a flyer, a price note and a ticket link. **Live** means it's inside its dates and today's hours. Live events flash a neon ring on the map and get a LIVE tag; **featured** events go first. Admins create them under **Admin → Events**. There are quick presets ("Tonight 10 PM–2 AM", "Sat 10 PM–3 AM"), and times are always entered in Nassau time. **Inbox** turns an "Event tip" into a pre-filled draft.
+An event has a start and end, optional weekly hours (for multi-day runs like a festival), a host venue (it uses that venue's pin) or its own location, any number of flyers and short videos, a price note and a ticket link. **Live** means it's inside its dates and today's hours. Live events flash a neon ring on the map and get a LIVE tag; **featured** events go first. Admins create them under **Admin → Events**. There are quick presets ("Tonight 10 PM–2 AM", "Sat 10 PM–3 AM"), and times are always entered in Nassau time. **Inbox** turns an "Event tip" into a pre-filled draft.
 
 ## Adding spots in the field
 
-Open `/admin` on your phone. **Quick add** grabs your GPS; type the name, tap type, area and price, and shoot **The place**, **Drinks menu** and **Food menu** photos, then **Save draft**. Back home, fill in hours, the activity radius, a description and the menus (tap an item's square to give it a photo). **Paste a menu** turns lines like `Rum Punch - 14` into items.
+Open `/admin` on your phone. **Quick add** grabs your GPS; type the name, tap type, area and price, and shoot **The place**, **Drinks menu** and **Food menu** photos, then **Save draft**. Back home, fill in hours, the activity radius, a description and the menus (tap an item's square to give it a photo). **Paste a menu** turns lines like `Rum Punch - 14` into items. The gallery and events also take **short videos** (up to 30 s): they're shrunk to a small 720p MP4 on your device before uploading, so keep the page open while it says “Optimising video”.
 
 ## Importing real spots from Google Maps
 

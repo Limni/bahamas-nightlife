@@ -366,13 +366,17 @@ grant execute on function public.contribution_count() to anon, authenticated;
 
 -- -----------------------------------------------------------------------------
 -- Storage
---   venue-media     public  — gallery, menu photos, covers (admin write)
+--   venue-media     public  — gallery, menu photos, covers, event flyers and
+--                             short videos (admin/manager write). 25 MB per file:
+--                             photos are compressed and videos re-encoded in the
+--                             browser first, so real uploads are far smaller.
 --   submission-uploads   private — photos attached to community suggestions
 --                                  (anyone can upload; only admins can view)
 -- -----------------------------------------------------------------------------
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('venue-media', 'venue-media', true, 15728640,
-        array['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif'])
+values ('venue-media', 'venue-media', true, 26214400,
+        array['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif',
+              'video/mp4', 'video/webm', 'video/quicktime'])
 on conflict (id) do update
   set public = true, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
 
@@ -1590,3 +1594,114 @@ $$;
 
 revoke execute on function public.admin_venue_managers(uuid) from public, anon;
 grant execute on function public.admin_venue_managers(uuid) to authenticated;
+
+-- =============================================================================
+-- Short videos and several flyers per event.
+--
+-- Videos (≤ 30 s) are re-encoded in the admin's browser with ffmpeg.wasm to a
+-- small H.264 MP4 plus a JPEG poster frame, then uploaded to venue-media like
+-- photos. Pages show the poster and only load the video when it's played.
+--
+--   * venue_photos.media_type 'video' (gallery only), with poster_* and
+--     duration_s. The cover stays an image: "use as cover" takes the poster.
+--   * event_media: an event's flyers and videos, in order. events.image_url /
+--     image_path are kept equal to the first flyer (else the first video's
+--     poster) by a trigger, so cards, the map drawer and the hero banner keep
+--     reading one image.
+-- =============================================================================
+alter table public.venue_photos add column if not exists media_type text not null default 'image';
+alter table public.venue_photos add column if not exists poster_url  text;
+alter table public.venue_photos add column if not exists poster_path text;
+alter table public.venue_photos add column if not exists duration_s  numeric(5, 1);
+
+alter table public.venue_photos drop constraint if exists venue_photos_media_type_check;
+alter table public.venue_photos add constraint venue_photos_media_type_check
+  check (media_type in ('image', 'video') and (media_type = 'image' or kind = 'gallery'));
+
+create table if not exists public.event_media (
+  id           uuid primary key default gen_random_uuid(),
+  event_id     uuid not null references public.events (id) on delete cascade,
+  media_type   text not null default 'image' check (media_type in ('image', 'video')),
+  url          text not null,
+  storage_path text,                 -- path inside the venue-media bucket (for deletes)
+  poster_url   text,                 -- videos: a still frame shown before playing
+  poster_path  text,
+  duration_s   numeric(5, 1),
+  caption      text check (char_length(caption) <= 200),
+  sort         int not null default 0,
+  created_at   timestamptz not null default now()
+);
+
+create index if not exists event_media_event_idx on public.event_media (event_id, sort);
+
+alter table public.event_media enable row level security;
+
+drop policy if exists "Media of visible events is public" on public.event_media;
+create policy "Media of visible events is public" on public.event_media
+  for select using (
+    public.is_admin()
+    or exists (
+      select 1 from public.events e
+      where e.id = event_id and (e.is_published or public.is_venue_manager(e.venue_id))
+    )
+  );
+
+drop policy if exists "Admins manage event media" on public.event_media;
+create policy "Admins manage event media" on public.event_media
+  for all using (public.is_admin()) with check (public.is_admin());
+
+drop policy if exists "Managers manage their event media" on public.event_media;
+create policy "Managers manage their event media" on public.event_media
+  for all
+  using (exists (select 1 from public.events e where e.id = event_id and public.is_venue_manager(e.venue_id)))
+  with check (exists (select 1 from public.events e where e.id = event_id and public.is_venue_manager(e.venue_id)));
+
+-- Keep events.image_url / image_path on the first flyer. Security definer, so
+-- it works the same whether an admin or a venue manager changed the media.
+create or replace function public.event_media_sync()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  ev uuid := coalesce(new.event_id, old.event_id);
+  first_url text;
+  first_path text;
+begin
+  select case when m.media_type = 'image' then m.url else m.poster_url end,
+         case when m.media_type = 'image' then m.storage_path else m.poster_path end
+    into first_url, first_path
+  from public.event_media m
+  where m.event_id = ev and (m.media_type = 'image' or m.poster_url is not null)
+  order by (m.media_type = 'image') desc, m.sort, m.created_at
+  limit 1;
+
+  update public.events
+     set image_url = first_url, image_path = first_path
+   where id = ev and (image_url is distinct from first_url or image_path is distinct from first_path);
+
+  -- A row moved to another event (not done by the app, but keep both right).
+  if tg_op = 'UPDATE' and old.event_id <> new.event_id then
+    update public.events e
+       set image_url = null, image_path = null
+     where e.id = old.event_id
+       and not exists (select 1 from public.event_media m where m.event_id = old.event_id);
+  end if;
+  return null;
+end;
+$$;
+
+drop trigger if exists event_media_sync on public.event_media;
+create trigger event_media_sync
+  after insert or update or delete on public.event_media
+  for each row execute function public.event_media_sync();
+
+-- One-time move of the single flyer events had before into event_media. Re-runs
+-- skip events that already have media (or whose last flyer was deleted, since
+-- the trigger then cleared image_url).
+insert into public.event_media (event_id, media_type, url, storage_path, sort)
+select e.id, 'image', e.image_url, e.image_path, 1
+from public.events e
+where e.image_url is not null
+  and not exists (select 1 from public.event_media m where m.event_id = e.id);

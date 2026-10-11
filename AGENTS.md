@@ -43,6 +43,7 @@ There is **no test suite**. To verify a change, run `npm run lint` and `npm run 
 | lucide-react | **1.x** | **Brand icons (Instagram, Facebook…) were removed** in 1.x. Use generic icons |
 | @supabase/supabase-js | 2 | single client in `src/lib/supabase.ts` |
 | exifr | 7 | lazy-imported, reads GPS from photo EXIF |
+| @ffmpeg/ffmpeg + @ffmpeg/core | 0.12 | admin-only, lazy: re-encodes short videos in the browser (single-thread core, self-hosted ~32 MB wasm) |
 
 Path alias: `@/` → `src/` (in both `vite.config.ts` and `tsconfig.json`).
 
@@ -91,7 +92,8 @@ src/
                            useMenuLikes, LikeSignInPrompt
     ActivityConsent.tsx    one-time opt-in card, Account toggle, "You're at X" banner
     Reviews.tsx            ReviewsSection (summary, own review form, list)
-    Lightbox.tsx           full-screen photo viewer
+    Lightbox.tsx           full-screen photo/video viewer
+    Media.tsx              MediaStill (photo, or video poster + play badge), VideoBadge, toLightbox
     SetupNotice.tsx        shown when Supabase env vars are missing
   pages/
     Explore.tsx            "/" landing + directory
@@ -111,9 +113,12 @@ src/
     QuickAdd.tsx           field capture: GPS + photos -> draft
     VenueEditor.tsx        full editor (incl. activity radius)
     EventsList.tsx         all events (upcoming / live / drafts / past)
-    EventEditor.tsx        create/edit an event (Nassau-time inputs, presets, flyer)
+    EventEditor.tsx        create/edit an event (Nassau-time inputs, presets, flyers & videos)
+    EventMediaManager.tsx  an event's flyers + short videos (event_media): upload, reorder, caption, delete
     ActivityAdmin.tsx      live counts, 24h visitors chart, per-venue table
-    PhotoManager.tsx       gallery/menu photo upload, reorder, caption, cover, delete
+    PhotoManager.tsx       gallery/menu photo upload (+ short videos in the gallery), reorder, caption, cover, delete
+    MediaUpload.tsx        useMediaUploader + MediaProgress: batch photo/video upload with progress, shared by both
+    video.ts               ffmpeg.wasm video optimiser (prepareVideo) and uploadMediaFile()
     MenuEditor.tsx         menu items + paste-a-menu parser (parseMenuText)
     LocationField.tsx      map pin, GPS, paste Google Maps link (parseCoordinates)
     HoursEditor.tsx        7-day hours editor
@@ -193,7 +198,8 @@ Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > Dir
 | --- | --- | --- |
 | `admins` | who is an admin | `user_id` → `auth.users`. `public.is_admin()` (security definer) checks `auth.uid()` |
 | `venues` | listings | `slug` (unique, auto-generated from the name by a trigger if empty), `name`, `description`, `categories text[]` (venue types), `vibes text[]`, `area`, `price_level 1–4`, `phone`, `website`, `instagram`, `facebook`, `address`, `lat`, `lng`, `hours jsonb`, `hours_note`, `cover_url`, `is_published`, `is_featured`, `featured_until`, `google_place_id` (unique, set by the importer), **`radius_m` (15–400, default 60: activity geofence)**, `created_at`, `updated_at` (auto via trigger) |
-| `venue_photos` | gallery + menu photos | `kind 'gallery'\|'menu'\|'food_menu'` (`menu` = photos of the **drinks** menu, the original kind), `url`, `storage_path` (for deletes), `caption`, `sort` |
+| `venue_photos` | gallery + menu photos, gallery videos | `kind 'gallery'\|'menu'\|'food_menu'` (`menu` = photos of the **drinks** menu, the original kind), **`media_type 'image'\|'video'`** (videos only in the gallery), `url`, `storage_path` (for deletes), `poster_url`/`poster_path` (videos), `duration_s`, `caption`, `sort` |
+| `event_media` | an event's flyers + short videos | `event_id` (cascade), `media_type`, `url`, `storage_path`, `poster_url`/`poster_path`, `duration_s`, `caption ≤200`, `sort`. Trigger `event_media_sync` (security definer) keeps `events.image_url`/`image_path` = the first image by sort, else the first video's poster. Existing single flyers were copied in once by `schema.sql` |
 | `menu_items` | structured menus | **`menu 'drinks'\|'food'`** (added later; existing items were sorted once by food-sounding section names), `section`, `name`, `description`, `price numeric(10,2)`, `sort`, `photo_url`/`photo_path` (one optional photo, `<venue_id>/items/…`), **`like_count`** (kept by a security-definer trigger on `menu_item_likes`; re-running the schema recounts) |
 | `venue_managers` | who manages which venue | `(venue_id, user_id)` PK (a member can manage several venues, a venue can have several managers), `created_by`, `created_at`. Cascades with the venue and the auth user |
 | `menu_item_likes` | likes on menu items | `(item_id, user_id)` PK (one like per member per item), `user_id` default `auth.uid()` → `profiles`, `created_at`. Cascades with the item and the member |
@@ -201,7 +207,7 @@ Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > Dir
 | `submissions` | community suggestions | `kind 'new_spot'\|'update'\|'closed'\|'event'\|'other'`, `venue_id`, `venue_name`, `fields text[]`, `message`, `contact_name`, `contact_email`, `credit_ok`, `photo_paths text[]` (≤6), `status 'new'\|'reviewing'\|'done'\|'dismissed'`, `admin_note` (private), `resolved_at` (trigger-set), `user_id` (default `auth.uid()`, null for anonymous) |
 | `profiles` | public member profile | `id` → `auth.users`, `display_name` (1–40 chars). Created by the `on_auth_user_created` trigger from sign-up metadata `display_name`. Existing users are backfilled |
 | `site_settings` | one row (`id = true`) of site-wide settings | `theme` (theme id, default `'neon'`; format-checked only, so new themes need no migration), `updated_at`. In the Realtime publication |
-| `events` | highlighted nights | `title`, `description`, `venue_id` (nullable, `on delete set null`), own `lat`/`lng`/`address` (else the venue's pin is used), `start_date`, `end_date` (check end ≥ start; **null = repeats until further notice**), `hours jsonb` (weekly windows; set = a weekly event), `image_url`/`image_path`, `price_note ≤80`, `ticket_url`, `is_published`, `is_featured`, timestamps. In Realtime |
+| `events` | highlighted nights | `title`, `description`, `venue_id` (nullable, `on delete set null`), own `lat`/`lng`/`address` (else the venue's pin is used), `start_date`, `end_date` (check end ≥ start; **null = repeats until further notice**), `hours jsonb` (weekly windows; set = a weekly event), `image_url`/`image_path` (**derived** from `event_media`, see below; don't write them from the app), `price_note ≤80`, `ticket_url`, `is_published`, `is_featured`, timestamps. In Realtime |
 | `presence` | **one row per device** currently at a venue | `device_id` PK, `venue_id`, `arrived_at`, `last_seen`, `counted_hour`. **No RLS policies: nobody can read it**; only the security-definer functions touch it. Never stores coordinates |
 | `venue_hourly` | hourly tallies | `(venue_id, hour_start)` PK, `visitors` (distinct phones that hour), `arrivals` (visits that started). Admin read only. Trimmed after 180 days |
 | `venue_live` | current count per venue | `live_count` (already floored: < 2 → 0), `updated_at`. Public read, **in Realtime**; written only when the value changes |
@@ -221,6 +227,7 @@ Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > Dir
 | `submissions` | admins | **anyone can insert**, but only as `status='new'` with no `admin_note`/`resolved_at` and `user_id` null or self; admins update/delete |
 | `profiles` | everyone (only `display_name` exists) | the owner updates their own (not while suspended); admins update any |
 | `events` | published for anyone; everything for admins; managers also see their venues' drafts | admins; managers insert/update/delete events whose `venue_id` is one of their venues (they can't move one elsewhere or create one without a venue) |
+| `event_media` | media of published events for anyone; all for admins; managers their venues' events (drafts too) | admins; managers of the event's venue |
 | `presence` | nobody | only `report_presence()` / housekeeping (security definer) |
 | `venue_live`, `venue_typical`, `venue_stats` | everyone (aggregates only) | only the activity functions |
 | `venue_hourly` | admins | only the activity functions |
@@ -254,7 +261,7 @@ Only admins may change `reviews.is_hidden`. The `reviews_guard` trigger forces `
 
 ### Storage buckets
 
-- `venue-media` is **public read**; only admins can write. Paths are `<venue_id>/<gallery|menu>/<timestamp>-<rand>.<ext>` (event flyers: `events/<event_id>/…`), uploaded with a 1-year cache. A unique path per upload means replacing an image changes its URL.
+- `venue-media` is **public read**; admins (and managers, for their venues/events) can write. **25 MB per file**; images plus `video/mp4`, `video/webm`, `video/quicktime`. Paths are `<venue_id>/<gallery|menu>/<timestamp>-<rand>.<ext>` (event flyers and videos: `events/<event_id>/…`; a video's poster sits next to it as a `.jpg`), uploaded with a 1-year cache. A unique path per upload means replacing an image changes its URL. Deleting a video row must delete both `storage_path` and `poster_path`.
 - `submission-uploads` is **private**. Anyone may upload into `inbox/` (8 MB max, images only); only admins can read (the admin Inbox uses signed URLs) or delete.
 
 ### Hours format
@@ -286,7 +293,7 @@ Ported from Island GO's map, on a dark basemap:
 ### Events (`/events`, `/events/:id`)
 - List grouped Live / Tonight / This week / Coming up, with range chips (Everything, Tonight, Next 7 days, Featured). Live cards get `.neon-edge` and a LIVE tag.
 - **Recurring nights** (`isRecurring`: weekly hours and a run longer than a day, or no end) are labelled "Every Fri · 10 PM", "Tonight · 10 PM · every Fri" or "… · until Nov 20". Sorting, "tonight" and "this week" use the **next session** (`nextSession` / `eventNextStart`), never `start_date`, which for a long-running weekly night is months old. The directory loads events with `end_date` null or in the future.
-- Detail: flyer hero (cropped banner), then, when a flyer was uploaded, the **full flyer** above About (uncropped, `max-h-[80vh]`; tap → `Lightbox`; hidden if the image fails to load), when (Nassau time; weekly schedule when set, recurring ones as "Every Friday" with since/until and only the nights it runs), price, tickets link, host venue card with its live level, directions, mini map, "On map" (`/map?event=`).
+- Detail: flyer hero (cropped banner, `image_url`), then the **flyers & videos** from `event_media` above About: the selected one large (a flyer uncropped, `max-h-[80vh]`, tap → `Lightbox`; a video inline with `preload="none"` and its poster), with a thumbnail strip when there are several (all open in the Lightbox, videos play there). Falls back to `image_url` when there are no rows (or the table is missing); images that fail to load are dropped, when (Nassau time; weekly schedule when set, recurring ones as "Every Friday" with since/until and only the nights it runs), price, tickets link, host venue card with its live level, directions, mini map, "On map" (`/map?event=`).
 
 ### Live activity sharing (`components/ActivityConsent.tsx`)
 - `ActivityConsentCard` asks once, when location is on and consent is unset (not on `/account`). Nothing is sent until "Count me in".
@@ -319,7 +326,7 @@ Ported from Island GO's map, on a dark basemap:
 
 ### Admin console (`/admin`)
 - **Login gate:** Supabase email + password. Non-admins see SQL to grant access. The console is phone-first and light (`colorScheme: light`): a 5-tab bottom bar (Spots, Events, Quick add, Inbox, Activity); Reviews / Members / Tags / Theme are icons in the phone header.
-- **Events:** list (Upcoming / Live now / Drafts / Past, with "No pin" and "Weekly" flags) and editor: title, description, price note, ticket link; **One-off** (start/end in **Nassau time** with presets: Tonight 10 PM–2 AM, Fri/Sat 10 PM–3 AM, Sun 4–9 PM) or **Every week** (night chips + one time window, or different times per night via `HoursEditor`; weekly presets; first night; **No end date** on by default, else a last night). A weekly run is stored as `start_date` = 6 AM on the first night and `end_date` = 6 AM after the last night (null with no end), so overnight sessions count and the night before doesn't; host venue (drafts included) and/or its own location; flyer upload (after the first save, to `events/<id>/`); Published / Featured; delete removes the flyer file. The venue editor links to "New event" with the venue preset, and an Inbox "Event tip" becomes **Create event** (`?venue=&notes=`).
+- **Events:** list (Upcoming / Live now / Drafts / Past, with "No pin" and "Weekly" flags) and editor: title, description, price note, ticket link; **One-off** (start/end in **Nassau time** with presets: Tonight 10 PM–2 AM, Fri/Sat 10 PM–3 AM, Sun 4–9 PM) or **Every week** (night chips + one time window, or different times per night via `HoursEditor`; weekly presets; first night; **No end date** on by default, else a last night). A weekly run is stored as `start_date` = 6 AM on the first night and `end_date` = 6 AM after the last night (null with no end), so overnight sessions count and the night before doesn't; host venue (drafts included) and/or its own location; **Flyers & videos** (`EventMediaManager`, after the first save, to `events/<id>/`: several flyers and short videos, reorder, caption; the first flyer is "Main"); Published / Featured; delete removes every media file. The venue editor links to "New event" with the venue preset, and an Inbox "Event tip" becomes **Create event** (`?venue=&notes=`).
 - **Activity:** phones counted now, venues buzzing, 30-day visits, a 24-hour visitors-per-hour chart (`venue_hourly`), and a per-venue table (level, live, usual now, 30-day visits, radius).
 - **Spots:** search; All / Live / Drafts / Needs info views. "Gap" badges show a missing pin, hours, photos or menu.
 - **Quick add**, built for the field:
@@ -334,7 +341,7 @@ Ported from Island GO's map, on a dark basemap:
   - Publishing saves everything; publishing without a pin asks for confirmation.
   - Featured has an optional end date. The slug is editable, and an empty slug is regenerated.
   - Delete also removes the spot's storage files.
-- **PhotoManager:** camera or library upload with progress, reorder (left/right), inline caption, set as cover, delete (also deletes the storage object). It auto-sets the cover for the first photo and reports EXIF GPS to the editor.
+- **PhotoManager:** camera or library upload with progress, reorder (left/right), inline caption, set as cover, delete (also deletes the storage object). It auto-sets the cover for the first photo and reports EXIF GPS to the editor. The **gallery** also takes **short videos** ("Add a short video", and the library picker): see "Videos" below. A video's "use as cover" sets its poster; the cover is always an image.
 - **MenuEditor** (`menu` prop; the editor's "Drinks & food menus" panel switches between the two, each with its own menu photos): add or edit items one at a time, or **Paste a menu**. Each item has a photo square (tap to add/replace, × to remove; old files are deleted), its like count, and a ⇄ button to move it to the other menu. Deleting an item deletes its photo; deleting a spot deletes item photos too. `parseMenuText` treats each line as an item with a trailing price (`Conch Fritters - 12`, `$12`, `12.50`). `Name | price | description` adds a description. A line ending in `:`, or a short ALL-CAPS line with no digits, starts a section.
 - **LocationField:** tap the map or drag the pin, "I'm here — use my GPS", or paste a Google Maps URL or `lat, lng`. `parseCoordinates` handles `!3d…!4d…`, `@lat,lng` and plain pairs; short `maps.app.goo.gl` links can't be expanded in the browser.
 - **Inbox:** tabs New / In progress / Done / Dismissed.
@@ -349,6 +356,16 @@ Ported from Island GO's map, on a dark basemap:
 
 ### Images (`lib/images.ts`)
 `compressImage` downscales to 1800 px (1600 px for community uploads) and re-encodes as WebP, falling back to JPEG when the browser silently returns PNG for WebP (older Safari). Re-encoding **strips EXIF**, so call `readPhotoGps(file)` **before** compressing. Formats the browser can't decode (e.g. HEIC on Chrome) are uploaded as the original file. Always render user-supplied image URLs with `<SafeImg>` (or `<EventArt>` for flyers), which fall back to the neon placeholder on error.
+
+### Videos (`admin/video.ts`)
+Gallery and event videos are optimised in the uploader's browser with **ffmpeg.wasm** (`@ffmpeg/ffmpeg` + the single-thread `@ffmpeg/core`, loaded via `?url` imports only when a video is picked; never in visitor chunks; no COOP/COEP needed). `prepareVideo(file)`:
+- rejects inputs over 400 MB; keeps the **first 30 s** (`VIDEO_MAX_SECONDS`; longer clips are cut, and the toast says so);
+- reads the streams first. Small web-ready clips (H.264 yuv420p, AAC or no audio, ≤ 30 fps, ≤ 1920 px, ≤ 12 MB: typical WhatsApp/Instagram exports) are only **remuxed** (`-c copy`, instant);
+- otherwise re-encodes to **H.264 CRF 28 `veryfast`, long side ≤ 1280 px (even dims), ≤ 30 fps (`fps=30` before the bilinear scale), AAC 96k, `+faststart`**; over 25 MB → one retry at 960 px / CRF 33, then an error. Rotation metadata (portrait phone clips) is applied;
+- grabs a JPEG **poster** frame at ~1 s. Progress comes from parsing `time=` in ffmpeg's log; the worker is `terminate()`d after each clip;
+- if ffmpeg can't run, a playable MP4/WebM already within 30 s / 25 MB is uploaded as is (poster from a `<video>` + canvas), else a `VideoError` explains.
+Timing reference (headless Chromium, one core): 40 s 1080p60 → 2 MB 720p30 in ~95 s; 8 s HEVC `.mov` ~27 s; a 20 s WhatsApp clip ~1 s. Phones are slower, hence "keep this page open" and a `beforeunload` guard. Vite: `optimizeDeps.exclude` the ffmpeg packages and `worker.format: 'es'`; nginx gzips `application/wasm`.
+Public pages show videos as their poster with a play badge (`MediaStill`) and only load the file on play (`preload="none"`/`"metadata"`) to spare Supabase egress. Rows read before the migration have no `media_type`: `isVideo()` treats that as an image.
 
 ### Sponsorship groundwork
 `is_featured` plus an optional `featured_until`. `isFeatured(r)` is true only before the end date. Featured spots sort first under Top picks, appear in the Featured rail and get a gold star pin. Events have their own `is_featured` (first on Events and the Explore rail). Payments are not built.

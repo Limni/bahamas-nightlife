@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, CalendarDays, ExternalLink, ImagePlus, Loader2, Repeat, Save, Trash2, X } from 'lucide-react';
+import { ArrowLeft, CalendarDays, ExternalLink, Repeat, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useDirectory } from '@/lib/directory';
-import { deleteMedia, uploadMedia } from '@/lib/images';
+import { deleteMedia } from '@/lib/images';
 import { dayLabel, DAY_NAMES, hasHours, type WeeklyHours } from '@/lib/hours';
 import { recurrenceLabel } from '@/lib/events';
 import type { NightEvent, Venue } from '@/lib/types';
@@ -12,6 +12,7 @@ import { Button, Field, inputClass, Panel, Toggle, useFeedback } from './ui';
 import { LocationField, type LatLng } from './LocationField';
 import { HoursEditor } from './HoursEditor';
 import { useConsole } from './console';
+import { EventMediaManager, eventMediaPaths } from './EventMediaManager';
 
 // ---------------------------------------------------------------------------
 // Event times are entered as Nassau wall-clock time, whatever timezone the
@@ -205,9 +206,7 @@ function EventEditor() {
   const [saved, setSaved] = useState<Form | null>(null);
   const [venues, setVenues] = useState<Venue[]>([]);
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [missing, setMissing] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     // All venues, drafts included: an event can be prepared before its spot goes live.
@@ -317,30 +316,11 @@ function EventEditor() {
     setSaved(toForm(data as NightEvent));
   };
 
-  const uploadImage = async (file: File) => {
+  // The flyer manager changed the media: pick up the synced image_url for the list and cards.
+  const mediaChanged = async () => {
     if (!event) return;
-    setUploading(true);
-    try {
-      const { url, path } = await uploadMedia(file, `events/${event.id}`);
-      const { error } = await supabase.from('events').update({ image_url: url, image_path: path }).eq('id', event.id);
-      if (error) throw error;
-      await deleteMedia(event.image_path);
-      setEvent({ ...event, image_url: url, image_path: path });
-      refresh();
-      toast('Flyer updated');
-    } catch (err) {
-      toast(err instanceof Error ? err.message : 'Upload failed', 'error');
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const removeImage = async () => {
-    if (!event?.image_url) return;
-    const { error } = await supabase.from('events').update({ image_url: null, image_path: null }).eq('id', event.id);
-    if (error) return toast(error.message, 'error');
-    await deleteMedia(event.image_path);
-    setEvent({ ...event, image_url: null, image_path: null });
+    const { data } = await supabase.from('events').select('image_url, image_path').eq('id', event.id).maybeSingle();
+    if (data) setEvent((e) => (e ? { ...e, ...data } : e));
     refresh();
   };
 
@@ -348,9 +328,10 @@ function EventEditor() {
     if (!event) return;
     const ok = await confirm({ title: `Delete “${event.title}”?`, body: 'This can’t be undone.', confirmLabel: 'Delete', danger: true });
     if (!ok) return;
+    const paths = await eventMediaPaths(event.id);
     const { error } = await supabase.from('events').delete().eq('id', event.id);
     if (error) return toast(error.message, 'error');
-    await deleteMedia(event.image_path);
+    await deleteMedia(event.image_path, ...paths);
     refresh();
     toast('Deleted');
     navigate(`${base}/events`, { replace: true });
@@ -584,43 +565,11 @@ function EventEditor() {
         </div>
       </Panel>
 
-      <Panel title="Flyer">
+      <Panel title="Flyers & videos">
         {isNew || !event ? (
-          <p className="text-sm font-semibold text-slate-500">Save the event first, then add a flyer or photo.</p>
+          <p className="text-sm font-semibold text-slate-500">Save the event first, then add flyers, photos or short videos.</p>
         ) : (
-          <div className="flex items-start gap-4">
-            <div className="relative w-40 aspect-[4/5] rounded-xl overflow-hidden bg-slate-100 border border-slate-200 shrink-0">
-              {event.image_url ? (
-                <>
-                  <img src={event.image_url} alt="" className="w-full h-full object-cover" />
-                  <button onClick={removeImage} className="absolute top-1.5 right-1.5 p-1 rounded-full bg-black/60 text-white" aria-label="Remove flyer">
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </>
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-slate-300">
-                  <ImagePlus className="w-8 h-8" />
-                </div>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Button variant="secondary" onClick={() => fileRef.current?.click()} disabled={uploading}>
-                {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImagePlus className="w-4 h-4" />} {event.image_url ? 'Replace' : 'Upload'}
-              </Button>
-              <p className="text-xs font-semibold text-slate-400">Compressed in the browser before upload.</p>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) uploadImage(f);
-                  e.target.value = '';
-                }}
-              />
-            </div>
-          </div>
+          <EventMediaManager eventId={event.id} onChange={mediaChanged} />
         )}
       </Panel>
 

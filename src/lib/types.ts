@@ -32,13 +32,38 @@ export interface Venue {
 /** 'menu' = photos of the drinks menu (the original kind), 'food_menu' = of the food menu. */
 export type PhotoKind = 'gallery' | 'menu' | 'food_menu';
 
-export interface Photo {
+export type MediaType = 'image' | 'video';
+
+/** What a photo or short video row has in common (venue_photos, event_media). */
+export interface MediaFields {
+  url: string;
+  /** Missing on rows read before the video migration ran: treat as 'image'. */
+  media_type?: MediaType;
+  storage_path: string | null;
+  /** Videos: a still frame to show until it's played. */
+  poster_url?: string | null;
+  poster_path?: string | null;
+  duration_s?: number | null;
+  caption: string | null;
+}
+
+export const isVideo = (m: Pick<MediaFields, 'media_type'>) => m.media_type === 'video';
+
+/** The image to show for a photo or video in a grid, hero or card. */
+export const stillOf = (m: Pick<MediaFields, 'media_type' | 'url' | 'poster_url'>) => (isVideo(m) ? m.poster_url ?? null : m.url);
+
+export interface Photo extends MediaFields {
   id: string;
   venue_id: string;
   kind: PhotoKind;
-  url: string;
-  storage_path: string | null;
-  caption: string | null;
+  sort: number;
+  created_at: string;
+}
+
+/** One of an event's flyers or short videos (event_media). */
+export interface EventMedia extends MediaFields {
+  id: string;
+  event_id: string;
   sort: number;
   created_at: string;
 }
@@ -150,6 +175,7 @@ export interface NightEvent {
   end_date: string | null;
   /** Optional weekly windows inside the date range (same format as venue hours); set = a weekly/recurring event. */
   hours: WeeklyHours | null;
+  /** The first flyer (or first video's poster), kept in sync from event_media by a trigger. */
   image_url: string | null;
   image_path: string | null;
   price_note: string | null;

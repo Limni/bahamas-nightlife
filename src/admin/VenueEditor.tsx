@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, CalendarPlus, ExternalLink, Martini, Save, Trash2, UtensilsCrossed } from 'lucide-react';
 import { supabase, MEDIA_BUCKET } from '@/lib/supabase';
 import { useDirectory } from '@/lib/directory';
-import { MENU_PHOTO_KIND, type MenuKind, type Venue } from '@/lib/types';
+import { MENU_PHOTO_KIND, type MenuKind, type Photo, type Venue } from '@/lib/types';
 import type { WeeklyHours } from '@/lib/hours';
 import { Spinner } from '@/components/ui';
 import { Button, Field, inputClass, Panel, Toggle, useFeedback } from './ui';
@@ -205,18 +205,22 @@ export default function VenueEditor() {
   const remove = async () => {
     const ok = await confirm({
       title: `Delete ${venue.name}?`,
-      body: 'This permanently removes the listing, its photos and menu. This can’t be undone.',
+      body: 'This permanently removes the listing, its photos, videos and menu. This can’t be undone.',
       confirmLabel: 'Delete forever',
       danger: true,
     });
     if (!ok) return;
     const [{ data: photos }, { data: items }] = await Promise.all([
-      supabase.from('venue_photos').select('storage_path').eq('venue_id', venue.id),
+      // '*' rather than naming poster_path, so this still works before the video migration.
+      supabase.from('venue_photos').select('*').eq('venue_id', venue.id),
       supabase.from('menu_items').select('photo_path').eq('venue_id', venue.id).not('photo_path', 'is', null),
     ]);
     const { error } = await supabase.from('venues').delete().eq('id', venue.id);
     if (error) return toast(error.message, 'error');
-    const paths = [...(photos ?? []).map((p) => p.storage_path), ...(items ?? []).map((i) => i.photo_path)].filter(Boolean) as string[];
+    const paths = [
+      ...((photos ?? []) as Photo[]).flatMap((p) => [p.storage_path, p.poster_path]),
+      ...(items ?? []).map((i) => i.photo_path),
+    ].filter(Boolean) as string[];
     if (paths.length) await supabase.storage.from(MEDIA_BUCKET).remove(paths);
     refresh();
     toast('Deleted');

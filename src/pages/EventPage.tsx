@@ -10,11 +10,12 @@ import { eventPosition, eventWhen, isEventEnded, isEventLive, isRecurring, recur
 import { DAY_NAMES, dayLabel, hasHours, todayIndex } from '@/lib/hours';
 import { directionsUrl } from '@/lib/geo';
 import { eventIcon, TILE_ATTRIBUTION, TILE_URL } from '@/lib/markers';
-import type { NightEvent } from '@/lib/types';
+import { isVideo, type EventMedia, type MediaFields, type NightEvent } from '@/lib/types';
 import { useNow } from '@/lib/useNow';
 import { EventArt, LiveTag } from '@/components/EventCard';
 import { EmptyState, HeatBadge, SafeImg, Spinner } from '@/components/ui';
 import { Lightbox } from '@/components/Lightbox';
+import { MediaStill, toLightbox } from '@/components/Media';
 
 const fmt = (iso: string, opts: Intl.DateTimeFormatOptions) =>
   new Intl.DateTimeFormat('en-US', { timeZone: 'America/Nassau', ...opts }).format(new Date(iso));
@@ -31,9 +32,12 @@ export default function EventPage() {
   const [fetched, setFetched] = useState<NightEvent | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [flyerOpen, setFlyerOpen] = useState(false);
-  // A flyer URL that 404s shows nothing rather than a broken image.
-  const [flyerFailed, setFlyerFailed] = useState<string | null>(null);
+  // Flyers and videos (event_media). null = not loaded (or no table yet): fall back to image_url.
+  const [media, setMedia] = useState<EventMedia[] | null>(null);
+  const [shown, setShown] = useState(0);
+  const [viewer, setViewer] = useState<number | null>(null);
+  // Flyer URLs that 404 are dropped rather than shown broken.
+  const [failed, setFailed] = useState<string[]>([]);
 
   // The directory only holds upcoming events; past ones (and drafts, for admins) load here.
   useEffect(() => {
@@ -49,12 +53,27 @@ export default function EventPage() {
         if (data) setFetched(data as NightEvent);
         else setNotFound(true);
       });
+    supabase
+      .from('event_media')
+      .select('*')
+      .eq('event_id', id!)
+      .order('sort')
+      .order('created_at')
+      .then(({ data, error }) => {
+        if (!alive) return;
+        setMedia(error ? null : ((data as EventMedia[]) ?? []));
+        setShown(0);
+      });
     return () => {
       alive = false;
     };
   }, [id]);
 
   const e = fetched ?? cached;
+  const flyers: MediaFields[] = (
+    media?.length ? media : e?.image_url ? [{ url: e.image_url, storage_path: null, caption: null, media_type: 'image' as const }] : []
+  ).filter((m) => !failed.includes(m.url));
+  const current = flyers[Math.min(shown, flyers.length - 1)];
 
   useEffect(() => {
     if (e) document.title = `${e.title} — Nassau Nights`;
@@ -181,25 +200,60 @@ export default function EventPage() {
 
         <div className="grid gap-4 md:grid-cols-5 mt-5">
           <div className="md:col-span-3 space-y-4">
-            {e.image_url && flyerFailed !== e.image_url && (
-              <button
-                onClick={() => setFlyerOpen(true)}
-                className="group relative block w-full bg-night-900 rounded-3xl border border-white/10 p-2 hover:border-brand-400/50 transition-colors"
-                aria-label={`Open the flyer for ${e.title} full screen`}
-              >
-                {/* The whole flyer, uncropped (the hero above crops it to a banner). */}
-                <img
-                  src={e.image_url}
-                  alt={`Flyer for ${e.title}`}
-                  loading="lazy"
-                  decoding="async"
-                  onError={() => setFlyerFailed(e.image_url)}
-                  className="block w-full h-auto max-h-[80vh] object-contain rounded-2xl"
-                />
-                <span className="absolute bottom-4 right-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-night-950/80 backdrop-blur text-xs font-extrabold text-white opacity-90 group-hover:opacity-100">
-                  <Maximize2 className="w-3.5 h-3.5" /> Tap to expand
-                </span>
-              </button>
+            {current && (
+              <section className="bg-night-900 rounded-3xl border border-white/10 p-2" aria-label="Flyers">
+                {isVideo(current) ? (
+                  <video
+                    key={current.url}
+                    src={current.url}
+                    poster={current.poster_url ?? undefined}
+                    controls
+                    playsInline
+                    // Nothing downloads until someone presses play (Supabase egress).
+                    preload="none"
+                    className="block w-full max-h-[80vh] rounded-2xl bg-black"
+                  />
+                ) : (
+                  <button
+                    onClick={() => setViewer(flyers.indexOf(current))}
+                    className="group relative block w-full"
+                    aria-label={`Open the flyer for ${e.title} full screen`}
+                  >
+                    {/* The whole flyer, uncropped (the hero above crops it to a banner). */}
+                    <img
+                      key={current.url}
+                      src={current.url}
+                      alt={current.caption || `Flyer for ${e.title}`}
+                      loading="lazy"
+                      decoding="async"
+                      onError={() => setFailed((f) => [...f, current.url])}
+                      className="block w-full h-auto max-h-[80vh] object-contain rounded-2xl"
+                    />
+                    <span className="absolute bottom-2 right-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-night-950/80 backdrop-blur text-xs font-extrabold text-white opacity-90 group-hover:opacity-100">
+                      <Maximize2 className="w-3.5 h-3.5" /> Tap to expand
+                    </span>
+                  </button>
+                )}
+                {current.caption && <p className="px-2 pt-2 text-sm font-semibold text-night-200">{current.caption}</p>}
+                {flyers.length > 1 && (
+                  <div className="flex gap-2 overflow-x-auto no-scrollbar p-1 mt-1" role="tablist" aria-label="More flyers and videos">
+                    {flyers.map((m, i) => (
+                      <button
+                        key={m.url}
+                        role="tab"
+                        aria-selected={m === current}
+                        aria-label={isVideo(m) ? `Video ${i + 1}` : `Flyer ${i + 1}`}
+                        onClick={() => setShown(i)}
+                        className={`shrink-0 w-16 h-20 rounded-xl overflow-hidden ring-2 transition ${
+                          m === current ? 'ring-brand-400' : 'ring-transparent opacity-70 hover:opacity-100'
+                        }`}
+                      >
+                        <MediaStill m={m} className="w-full h-full" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
             )}
             {e.description && (
               <section className="bg-night-900 rounded-3xl border border-white/10 p-5">
@@ -286,14 +340,15 @@ export default function EventPage() {
           </div>
         </div>
       </div>
-      {e.image_url && (
-        <Lightbox
-          images={[{ url: e.image_url, caption: e.title }]}
-          index={flyerOpen ? 0 : null}
-          onIndex={() => {}}
-          onClose={() => setFlyerOpen(false)}
-        />
-      )}
+      <Lightbox
+        images={flyers.map((m) => ({ ...toLightbox(m), caption: m.caption || e.title }))}
+        index={viewer}
+        onIndex={(i) => {
+          setViewer(i);
+          setShown(i);
+        }}
+        onClose={() => setViewer(null)}
+      />
     </div>
   );
 }

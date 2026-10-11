@@ -42,13 +42,12 @@ const extFor = (blob: Blob, fallbackName: string) => {
 
 const uniqueName = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-/** Compress and upload an image to the public media bucket. */
-export async function uploadMedia(file: File, folder: string): Promise<{ url: string; path: string }> {
-  const blob = await compressImage(file);
-  const path = `${folder}/${uniqueName()}.${extFor(blob, file.name)}`;
+/** Upload a file as-is to the public media bucket under a unique name. */
+export async function uploadBlob(blob: Blob, folder: string, name: string): Promise<{ url: string; path: string }> {
+  const path = `${folder}/${uniqueName()}.${extFor(blob, name)}`;
   const { error } = await supabase.storage.from(MEDIA_BUCKET).upload(path, blob, {
     cacheControl: '31536000', // unique path per upload, so cache forever
-    contentType: blob.type || file.type || undefined,
+    contentType: blob.type || undefined,
     upsert: false,
   });
   if (error) throw error;
@@ -56,9 +55,15 @@ export async function uploadMedia(file: File, folder: string): Promise<{ url: st
   return { url: data.publicUrl, path };
 }
 
-export async function deleteMedia(path: string | null | undefined) {
-  if (!path) return;
-  await supabase.storage.from(MEDIA_BUCKET).remove([path]);
+/** Compress and upload an image to the public media bucket. */
+export async function uploadMedia(file: File, folder: string): Promise<{ url: string; path: string }> {
+  const blob = await compressImage(file);
+  return uploadBlob(blob.type ? blob : new Blob([blob], { type: file.type }), folder, file.name);
+}
+
+export async function deleteMedia(...paths: (string | null | undefined)[]) {
+  const list = paths.filter((p): p is string => !!p);
+  if (list.length) await supabase.storage.from(MEDIA_BUCKET).remove(list);
 }
 
 /** Community upload: compressed harder, lands in the private inbox folder. */

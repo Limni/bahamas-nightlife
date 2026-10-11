@@ -98,6 +98,7 @@ Optional **Variables**:
      If sending ever fails, the console falls back to showing the link, with the reason.
 
   Invite links return to `/account` on the domain the admin is using, so that domain must be in the Redirect URLs above. They expire after 24 hours (Authentication → Emails → "Email OTP expiration"); **Resend invite** makes a fresh one.
+- **After pulling the video / multiple-flyers update**: re-run `supabase/schema.sql` in the SQL Editor. It adds `event_media` and the video columns, raises the `venue-media` bucket limit to 25 MB with video types allowed, and copies each event's existing flyer into `event_media`. Until then the app keeps working, but event flyer uploads say a database update is needed. Videos are optimised in the browser, so the server needs nothing else; the Docker image is ~32 MB bigger (the ffmpeg core), which only admins and managers download, once, when they add a video.
 - **Optional, pg_cron**: Database → Extensions → enable `pg_cron`, then run the `cron.schedule(...)` line at the end of `schema.sql`. Live levels then fade on the minute even when nobody has the site open; without it they fade on the next ping or page view.
 
 ## 5b. Google Analytics and Search Console
