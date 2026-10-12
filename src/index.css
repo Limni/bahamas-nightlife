@@ -81,6 +81,9 @@ body {
   background-attachment: fixed;
   color: var(--color-night-100);
   -webkit-tap-highlight-color: transparent;
+  /* A pasted link or a run-on word in a description, review or suggestion
+     breaks to fit instead of widening the page (which lets phones zoom out). */
+  overflow-wrap: break-word;
 }
 
 h1, h2, h3, h4, h5, h6, .font-display {

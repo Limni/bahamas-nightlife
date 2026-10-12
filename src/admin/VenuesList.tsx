@@ -141,7 +141,9 @@ export default function VenuesList() {
           )}
         </div>
       ) : (
-        <ul className="grid gap-2">
+        // minmax(0, 1fr), not an auto column: a long name would otherwise widen
+        // the column to its untruncated length and push the page past the screen.
+        <ul className="grid grid-cols-1 gap-2">
           {list.map((r) => {
             const m = missing(r);
             const menuMissing = (r.menu_items[0]?.count ?? 0) === 0 && !menuPhotoCounts[r.id];

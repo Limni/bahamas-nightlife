@@ -63,7 +63,7 @@ export default function ThemeSettings() {
         </p>
       </div>
 
-      <div className="grid sm:grid-cols-2 gap-3 md:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
         {THEMES.map((t) => {
           const live = t.id === activeId;
           return (

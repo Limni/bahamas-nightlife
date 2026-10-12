@@ -301,7 +301,7 @@ export default function VenuePage() {
 
         <div className="mt-4">
           {tab === 'overview' && (
-            <div className="grid gap-4 md:grid-cols-5">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
               <div className="md:col-span-3 space-y-4">
                 <Card title="Live activity" icon={<Radio className="w-4 h-4" />}>
                   <PopularTimes venueId={r.id} now={now} />
@@ -350,7 +350,7 @@ export default function VenuePage() {
                 )}
 
                 {(drinks.length + menuPhotos.length > 0 || food.length + foodPhotos.length > 0) && (
-                  <div className={`grid gap-3 ${drinks.length + menuPhotos.length > 0 && food.length + foodPhotos.length > 0 ? 'sm:grid-cols-2' : ''}`}>
+                  <div className={`grid grid-cols-1 gap-3 ${drinks.length + menuPhotos.length > 0 && food.length + foodPhotos.length > 0 ? 'sm:grid-cols-2' : ''}`}>
                     {(
                       [
                         ['menu', 'See the drinks menu', drinks.length, menuPhotos.length, 'from-brand-500 to-glow-500'],

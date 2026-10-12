@@ -352,7 +352,7 @@ function SignedIn() {
           <p className="text-sm font-semibold text-night-300 mb-3">
             Update your listing{managed.length > 1 ? 's' : ''}: details, hours, photos, drinks and food menus, and events.
           </p>
-          <ul className="grid sm:grid-cols-2 gap-2">
+          <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {managed.map((v) => (
               <li key={v.id}>
                 <Link to={`/manage/v/${v.id}`} className="flex items-center gap-3 p-2.5 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10">

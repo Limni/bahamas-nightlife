@@ -478,6 +478,7 @@ The full runbook is in **`DEPLOY.md`**. The essentials:
 ## Conventions and gotchas
 
 - **`useEffect` must not return a value.** `useEffect(() => window.scrollTo(0,0), …)` crashed the whole app on load (React treats the return value as a cleanup function). Always use a block body: `useEffect(() => { doThing(); }, [...])`.
+- **Nothing may be wider than a phone screen**, or mobile browsers widen the page and let you zoom out of the UI. Give every `grid` a column template at the base size (`grid grid-cols-1 sm:grid-cols-2`, never a bare `grid`): an implicit grid column grows to its widest item's untruncated text, so `truncate` stops working. Chip/tab rows that scroll need `max-w-full overflow-x-auto`. Long unbroken text (links, emails) wraps via `overflow-wrap: break-word` on `body`; inside flex rows add `min-w-0` + `truncate`. Check a change by comparing `document.documentElement.scrollWidth` with `clientWidth` at 375 px (Playwright `isMobile: true` allows widths under 500).
 - **lucide-react 1.x has no brand icons.** Importing `Instagram` or `Facebook` fails the type-check.
 - **Line endings:** the repo is edited on Windows. `.gitattributes` forces LF for `*.sh`, `*.conf`, `*.yml` and `Dockerfile`, because a CRLF `deploy.sh` breaks on Linux. Keep new server-side files covered.
 - **Lockfile:** generated on Windows. Don't "fix" Linux `npm ci` failures by editing the lock; the Dockerfile already falls back.

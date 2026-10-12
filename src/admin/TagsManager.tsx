@@ -99,7 +99,7 @@ export default function TagsManager() {
         <h1 className="text-2xl font-black text-slate-900">Tags</h1>
         <p className="text-sm font-semibold text-slate-500">The options people filter by. Changes show up on the site immediately.</p>
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {KINDS.map((k) => (
           <div key={k.kind} className={k.kind === 'area' ? 'md:col-span-2' : ''}>
             <TagList {...k} />

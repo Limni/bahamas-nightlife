@@ -198,7 +198,7 @@ export default function EventPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-5 mt-5">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-5 mt-5">
           <div className="md:col-span-3 space-y-4">
             {current && (
               <section className="bg-night-900 rounded-3xl border border-white/10 p-2" aria-label="Flyers">

@@ -119,7 +119,7 @@ export function ReviewsSection({ venue }: { venue: Venue }) {
   const nextUrl = encodeURIComponent(`/v/${venue.slug}?tab=reviews`);
 
   return (
-    <div className="grid gap-4 md:grid-cols-5">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
       {/* Summary + your review */}
       <div className="md:col-span-2 space-y-4">
         <section className="bg-night-900 rounded-3xl border border-white/10 p-5">

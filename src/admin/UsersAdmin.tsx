@@ -194,7 +194,7 @@ export default function UsersAdmin({ meId }: { meId: string }) {
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
-        <div className="flex gap-1 bg-white rounded-xl p-1 border border-slate-200 text-xs font-extrabold w-fit overflow-x-auto no-scrollbar">
+        <div className="flex gap-1 bg-white rounded-xl p-1 border border-slate-200 text-xs font-extrabold w-fit max-w-full overflow-x-auto no-scrollbar">
           {(
             [
               ['all', 'All'],
@@ -691,7 +691,7 @@ function InvitePanel({ onClose, onSent }: { onClose: () => void; onSent: () => v
           <X className="w-5 h-5" />
         </button>
       </div>
-      <div className="grid sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Field label="Email">
           <input className={inputClass} type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" autoFocus />
         </Field>

@@ -221,7 +221,7 @@ export default function Community() {
 
       {!supabaseConfigured && <SetupNotice />}
 
-      <div className="grid gap-6 lg:grid-cols-5">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
         <div className="lg:col-span-3">
           {status === 'sent' ? (
             <div className="bg-night-900 rounded-3xl border border-white/10 p-8 text-center">
@@ -376,7 +376,7 @@ export default function Community() {
                   </span>
                 </div>
               ) : (
-              <div className="grid sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <label className="block">
                   <span className="text-sm font-extrabold text-white">Your name <span className="font-semibold text-night-300">(optional)</span></span>
                   <input

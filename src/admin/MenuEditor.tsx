@@ -172,7 +172,7 @@ export function MenuEditor({ venueId, menu }: { venueId: string; menu: MenuKind 
           <input className={inputClass} placeholder="Item name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && save()} />
           <input className={inputClass} placeholder="Price" inputMode="decimal" value={draft.price} onChange={(e) => setDraft({ ...draft, price: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && save()} />
         </div>
-        <div className="grid sm:grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <input className={inputClass} placeholder={`Section (${sections[sections.length - 1] ?? 'Menu'})`} list={`sections-${venueId}-${menu}`} value={draft.section} onChange={(e) => setDraft({ ...draft, section: e.target.value })} />
           <datalist id={`sections-${venueId}-${menu}`}>
             {sections.map((s) => (

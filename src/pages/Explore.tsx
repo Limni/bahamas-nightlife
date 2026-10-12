@@ -365,7 +365,7 @@ export default function Explore() {
           <div className="md:hidden mb-6">
             <Logo />
           </div>
-          <div className="grid lg:grid-cols-[1.3fr_1fr] gap-8 items-center">
+          <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-8 items-center">
             <div>
               {theme.badge && (
                 <p className="mb-3 w-fit flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/15 text-xs font-extrabold text-white">
@@ -750,7 +750,7 @@ export default function Explore() {
         )}
 
         {loading ? (
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 6 }, (_, i) => (
               <div key={i} className="rounded-[1.75rem] bg-night-900 border border-white/10 overflow-hidden animate-pulse">
                 <div className="aspect-[4/3] bg-night-800" />
@@ -779,13 +779,13 @@ export default function Explore() {
             </EmptyState>
           )
         ) : view === 'list' ? (
-          <div className="grid gap-3 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {results.map((r) => (
               <VenueRow key={r.id} r={r} now={now} distance={distanceLabel(r)} />
             ))}
           </div>
         ) : (
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {results.map((r) => (
               <VenueCard key={r.id} r={r} now={now} distance={distanceLabel(r)} />
             ))}

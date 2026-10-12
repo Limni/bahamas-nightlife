@@ -156,7 +156,7 @@ export default function QuickAdd() {
           <Field label="Category">
             <TagPicker kind="category" value={categories} onChange={setCategories} />
           </Field>
-          <div className="grid sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Price">
               <div className="grid grid-cols-4 gap-1.5">
                 {[1, 2, 3, 4].map((p) => (

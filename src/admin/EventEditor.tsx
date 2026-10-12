@@ -407,7 +407,7 @@ function EventEditor() {
               placeholder="Who’s playing, dress code, specials…"
             />
           </Field>
-          <div className="grid sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Price / entry" hint="Shown on the card, e.g. “$20 at the door”, “Free before 11”.">
               <input className={inputClass} value={form.price_note} onChange={(e) => set('price_note', e.target.value)} maxLength={80} />
             </Field>
@@ -452,7 +452,7 @@ function EventEditor() {
                   </button>
                 ))}
               </div>
-              <div className="grid sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field label="Starts">
                   <input type="datetime-local" className={inputClass} value={form.start} onChange={(e) => set('start', e.target.value)} />
                 </Field>
@@ -505,7 +505,7 @@ function EventEditor() {
               <button type="button" onClick={() => toggleCustomTimes(!form.custom_times)} className="text-sm font-extrabold text-brand-700 hover:underline">
                 {form.custom_times ? 'Same time every night' : 'Different times on different nights'}
               </button>
-              <div className="grid sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field label="First night">
                   <input type="date" className={inputClass} value={form.first_night} onChange={(e) => set('first_night', e.target.value)} />
                 </Field>

@@ -381,7 +381,7 @@ export default function VenueEditor() {
       </Panel>
 
       <Panel title="Contact" id="contact">
-        <div className="grid sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Phone">
             <input className={inputClass} type="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="242-555-0123" />
           </Field>

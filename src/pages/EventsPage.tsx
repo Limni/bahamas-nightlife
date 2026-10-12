@@ -20,7 +20,7 @@ function Group({ title, eyebrow, events, now }: { title: string; eyebrow?: strin
     <section className="mt-8">
       {eyebrow && <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-brand-300 mb-1">{eyebrow}</p>}
       <h2 className="font-display text-xl font-bold text-white mb-4">{title}</h2>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {events.map((e) => (
           <EventCard key={e.id} e={e} now={now} wide />
         ))}

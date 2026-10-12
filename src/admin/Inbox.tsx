@@ -153,8 +153,8 @@ function SubmissionCard({ s, onChanged }: { s: Row; onChanged: () => void }) {
         <p className="text-sm font-semibold text-slate-500 flex flex-wrap items-center gap-x-3">
           <span>From {s.contact_name || 'anonymous'}</span>
           {s.contact_email && (
-            <a href={`mailto:${s.contact_email}`} className="inline-flex items-center gap-1 text-brand-700 hover:underline">
-              <Mail className="w-3.5 h-3.5" /> {s.contact_email}
+            <a href={`mailto:${s.contact_email}`} className="inline-flex items-center gap-1 min-w-0 max-w-full text-brand-700 hover:underline">
+              <Mail className="w-3.5 h-3.5 shrink-0" /> <span className="truncate">{s.contact_email}</span>
             </a>
           )}
           {!s.credit_ok && <span className="text-xs text-slate-400">(prefers no public credit)</span>}
