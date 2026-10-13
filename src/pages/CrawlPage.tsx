@@ -4,7 +4,7 @@ import { MapContainer, Marker, Polyline, TileLayer, useMap } from 'react-leaflet
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import {
-  AlertTriangle, ArrowDown, ArrowUp, CalendarHeart, CarTaxiFront, Clock, ExternalLink, Footprints, ListPlus, LocateFixed, Minus, Pencil, Phone,
+  AlertTriangle, ArrowDown, ArrowUp, CalendarHeart, Check, Copy, Link2, CarTaxiFront, Clock, ExternalLink, Footprints, ListPlus, LocateFixed, Minus, Pencil, Phone,
   Plus, RefreshCw, Route, Search, Share2, Shuffle, Sparkles, Users, X,
 } from 'lucide-react';
 import { supabase, supabaseConfigured } from '@/lib/supabase';
@@ -14,6 +14,7 @@ import { useFavorites } from '@/lib/favorites';
 import { NEW_PROVIDENCE, formatDistance } from '@/lib/geo';
 import { nassauClock } from '@/lib/hours';
 import { TILE_ATTRIBUTION, TILE_URL } from '@/lib/markers';
+import { canNativeShare, shareLink } from '@/lib/share';
 import {
   autoStops, bestOrder, candidates, formatClock, googleMapsUrl, isLongLeg, MAX_CUSTOM_STOPS, minutesLabel, nassauTime, nightOptions, planCrawl,
   planCustom, swapStop,
@@ -240,17 +241,12 @@ export default function CrawlPage() {
     setParams(writeRequest(req, next.stops.map((s) => s.venue.id), false), { replace: true });
   };
 
-  const share = async () => {
-    const url = window.location.href;
-    const title = 'Our bar crawl — Nassau Nights';
-    try {
-      if (navigator.share) return await navigator.share({ title, url });
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* dismissed */
-    }
+  // The plan's own address (the URL carries the whole plan).
+  const shareUrl = `${window.location.origin}/crawl?${params.toString()}`;
+  const copyLink = async () => {
+    if ((await shareLink(shareUrl, 'Our bar crawl — Nassau Nights')) !== 'copied') return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const createOwn = () => {
@@ -289,16 +285,38 @@ export default function CrawlPage() {
         href={googleMapsUrl(plan, origin)}
         target="_blank"
         rel="noreferrer"
-        className="inline-flex items-center justify-center gap-2 py-3 rounded-2xl bg-sky-400/10 border border-sky-400/30 text-sky-100 font-extrabold text-sm hover:border-sky-400/60"
+        className={`${canNativeShare() ? '' : 'sm:col-span-2 '}inline-flex items-center justify-center gap-2 py-3 rounded-2xl bg-sky-400/10 border border-sky-400/30 text-sky-100 font-extrabold text-sm hover:border-sky-400/60`}
       >
         <ExternalLink className="w-4 h-4" /> Directions in Google Maps
       </a>
-      <button
-        onClick={share}
-        className="inline-flex items-center justify-center gap-2 py-3 rounded-2xl bg-white/5 border border-white/10 text-night-100 font-extrabold text-sm hover:border-white/25"
-      >
-        <Share2 className="w-4 h-4" /> {copied ? 'Link copied' : 'Share with the group'}
-      </button>
+      {canNativeShare() ? (
+        <button
+          onClick={copyLink}
+          className="inline-flex items-center justify-center gap-2 py-3 rounded-2xl bg-white/5 border border-white/10 text-night-100 font-extrabold text-sm hover:border-white/25"
+        >
+          <Share2 className="w-4 h-4" /> Share with the group
+        </button>
+      ) : (
+        // On a computer the plan's link is just shown, ready to copy.
+        <div className="sm:col-span-2 flex items-stretch gap-2 p-1.5 rounded-2xl bg-white/5 border border-white/10">
+          <label className="min-w-0 flex-1 flex items-center gap-2 pl-2">
+            <Link2 className="w-4 h-4 shrink-0 text-glow-300" />
+            <span className="sr-only">Link to this plan</span>
+            <input
+              readOnly
+              value={shareUrl}
+              onFocus={(e) => e.currentTarget.select()}
+              className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-night-100 outline-none"
+            />
+          </label>
+          <button
+            onClick={copyLink}
+            className={`shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-extrabold ${copied ? 'bg-emerald-500/20 text-emerald-200' : 'bg-brand-500 text-white hover:bg-brand-400'}`}
+          >
+            {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {copied ? 'Copied' : 'Copy link'}
+          </button>
+        </div>
+      )}
     </div>
   );
   const safety = (

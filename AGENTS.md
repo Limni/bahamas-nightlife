@@ -510,6 +510,7 @@ The full runbook is in **`DEPLOY.md`**. The essentials:
 - **Lockfile:** generated on Windows. Don't "fix" Linux `npm ci` failures by editing the lock; the Dockerfile already falls back.
 - **Colour classes:** use `night` / `brand` / `glow` / `heat-*` (plus `emerald` for open and `amber` for featured), not new hex colours, except as one-off gradient stops and the per-category pin colours in `markers.ts`.
 - **Images:** user or remote images go through `<SafeImg>`. Uploads go through `uploadMedia` / `uploadSubmissionPhoto` (compressed, unique paths). Delete storage objects when deleting rows (`storage_path`).
+- **Sharing a page:** use `shareLink()` / `canNativeShare()` (`lib/share.ts`), never `navigator.share` directly: the native share sheet is for touch devices only; on computers it copies the link (the crawl page shows the link in a box with Copy link).
 - **Admin feedback:** `useFeedback().toast/confirm`, never browser dialogs.
 - **Bundle split:** the admin code and Leaflet pages are `lazy()`. Don't import `src/admin/*` from public pages. Vendor chunks (react, supabase, leaflet, motion) are split in `vite.config.ts`.
 - **Security:** keep all authorization in RLS and security-definer RPCs. Never trust the client for `is_hidden`, `status`, `admin_note`, or `user_id`. Public RPCs must never expose emails or `admin_note`.

@@ -16,6 +16,7 @@ import { EventArt, LiveTag } from '@/components/EventCard';
 import { EmptyState, HeatBadge, SafeImg, Spinner } from '@/components/ui';
 import { Lightbox } from '@/components/Lightbox';
 import { MediaStill, toLightbox } from '@/components/Media';
+import { shareLink } from '@/lib/share';
 
 const fmt = (iso: string, opts: Intl.DateTimeFormatOptions) =>
   new Intl.DateTimeFormat('en-US', { timeZone: 'America/Nassau', ...opts }).format(new Date(iso));
@@ -109,16 +110,10 @@ export default function EventPage() {
   const lastNight = e.end_date ? new Date(new Date(e.end_date).getTime() - 43_200_000).toISOString() : null;
 
   const share = async () => {
-    const url = window.location.href.split('?')[0];
-    try {
-      if (navigator.share) await navigator.share({ title: e.title, url });
-      else {
-        await navigator.clipboard.writeText(url);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1600);
-      }
-    } catch {
-      /* dismissed */
+    // The page itself is the link: if the clipboard is refused, the address bar still has it.
+    if ((await shareLink(window.location.href.split('?')[0], e.title)) === 'copied') {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
     }
   };
 

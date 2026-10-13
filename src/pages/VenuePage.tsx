@@ -21,6 +21,7 @@ import { TabBar } from '@/components/TabBar';
 import { LikeSignInPrompt, MenuSections, useMenuLikes } from '@/components/MenuList';
 import { PopularTimes } from '@/components/PopularTimes';
 import { EventCard } from '@/components/EventCard';
+import { shareLink } from '@/lib/share';
 
 // 'menu' is the drinks menu (its URL, ?tab=menu, predates the food menu).
 type Tab = 'overview' | 'menu' | 'food' | 'photos' | 'reviews';
@@ -143,16 +144,10 @@ export default function VenuePage() {
     setLightbox({ images: list.map(toLightbox), index });
 
   const share = async () => {
-    const url = window.location.href.split('?')[0];
-    try {
-      if (navigator.share) await navigator.share({ title: r.name, url });
-      else {
-        await navigator.clipboard.writeText(url);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1600);
-      }
-    } catch {
-      /* dismissed */
+    // The page itself is the link: if the clipboard is refused, the address bar still has it.
+    if ((await shareLink(window.location.href.split('?')[0], r.name)) === 'copied') {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
     }
   };
 
