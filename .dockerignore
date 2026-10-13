@@ -21,3 +21,4 @@ supabase
 # The importer stays out of the image; the sitemap generator runs in `npm run build`.
 scripts/*
 !scripts/sitemap.mjs
+docs

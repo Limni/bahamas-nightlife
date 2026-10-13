@@ -1,10 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import {
-  Armchair, ArrowRight, Award, Beer, Building2, CalendarHeart, ChevronLeft, ChevronRight, Crown, Disc3, Drum, Flame, Flower2, Gem, Heart,
-  LayoutGrid, List, LocateFixed, MapPin, Martini, Mic, Moon, Music, Radio, Rainbow, SearchX, Shirt, Sparkles, Star, Sun, TrendingUp,
-  Users, Waves, X, type LucideIcon,
-} from 'lucide-react';
+import { Armchair, ArrowRight, Award, Beer, Building2, CalendarHeart, ChevronLeft, ChevronRight, Crown, Disc3, Drum, Flame, Flower2, Gem, Heart, LayoutGrid, List, LocateFixed, MapPin, Martini, Mic, Moon, Music, Radio, Rainbow, SearchX, Shirt, Sparkles, Star, Sun, TrendingUp, Users, Waves, X, type LucideIcon, Route } from 'lucide-react';
 import { useDirectory, useUserLocation } from '@/lib/directory';
 import { activeFilterCount, EMPTY_FILTERS, matchesFilters, useFilters, type Filters } from '@/lib/filters';
 import { formatDistance, getDistance } from '@/lib/geo';
@@ -404,6 +400,9 @@ export default function Explore() {
                 </button>
                 <Link to="/events" className={pill}>
                   <CalendarHeart className="w-4 h-4" /> Events
+                </Link>
+                <Link to="/crawl" className={pill}>
+                  <Route className="w-4 h-4" /> Plan a crawl
                 </Link>
                 {suggestionExists && (
                   <button

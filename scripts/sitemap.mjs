@@ -43,6 +43,7 @@ const urls = [
   { loc: '/', changefreq: 'daily', priority: '1.0', lastmod: today },
   { loc: '/events', changefreq: 'daily', priority: '0.9', lastmod: today },
   { loc: '/map', changefreq: 'daily', priority: '0.8' },
+  { loc: '/crawl', changefreq: 'weekly', priority: '0.6' },
   { loc: '/community', changefreq: 'monthly', priority: '0.4' },
 ];
 

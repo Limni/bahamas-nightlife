@@ -18,6 +18,7 @@ const VenuePage = lazy(() => import('@/pages/VenuePage'));
 const EventsPage = lazy(() => import('@/pages/EventsPage'));
 const EventPage = lazy(() => import('@/pages/EventPage'));
 const Community = lazy(() => import('@/pages/Community'));
+const CrawlPage = lazy(() => import('@/pages/CrawlPage'));
 const Account = lazy(() => import('@/pages/Account'));
 const AdminApp = lazy(() => import('@/admin/AdminApp'));
 const ManagerApp = lazy(() => import('@/admin/ManagerApp'));
@@ -56,6 +57,7 @@ export default function App() {
                   <Route path="events" element={<EventsPage />} />
                   <Route path="events/:id" element={<EventPage />} />
                   <Route path="community" element={<Community />} />
+                  <Route path="crawl" element={<CrawlPage />} />
                   <Route path="account" element={<Account />} />
                 </Route>
                 <Route path="admin/*" element={<AdminApp />} />

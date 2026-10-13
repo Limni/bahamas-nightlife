@@ -66,6 +66,8 @@ src/
     favorites.tsx          FavoritesProvider/useFavorites: the member's favourite spot ids, toggle, signed-out prompt
     activity.tsx           ActivityProvider/useActivity: consent, nightly device id, presence pings,
                            venue_activity() fetch + Realtime; heatFor()/HEAT_META levels; usePopularTimes()
+    crawl.ts               bar crawl planner: candidates, scoring at arrival time, beam search, travel estimates,
+                           swapStop, planFromIds (shared links), googleMapsUrl, Nassau wall-clock helpers
     events.ts              isEventLive/Ended/Soon, nextSession/eventNextStart, isRecurring/recurrenceLabel,
                            eventPosition (own pin or venue's), eventWhen labels
     filters.tsx            FiltersProvider + matchesFilters()
@@ -104,6 +106,7 @@ src/
     EventsPage.tsx         "/events"
     EventPage.tsx          "/events/:id"
     Community.tsx          "/community" suggestions form + community wins
+    CrawlPage.tsx          "/crawl" bar crawl planner (form, timeline, route map, share/swap/shuffle)
     Account.tsx            "/account" sign in/up/reset, profile, my reviews, my suggestions
   admin/                   "/admin/*" console and "/manage/*" venue manager (lazy-loaded, never in the visitor bundle)
     AdminApp.tsx           admin login gate, shell, nav, routes
@@ -136,6 +139,7 @@ supabase/
   seed_demo.sql            optional fictional venues ("demo-*"), events ("Demo ·") and 8 weeks
                            of crowd history + a live crowd
   functions/invite-member/ Edge Function (Deno): admin-only invites (generateLink + our own styled email)
+docs/                      design notes for unbuilt/partly built features (bar crawl phases 2–3, day site, domains/SEO)
 scripts/
   seed-google.ts           Google Places importer (Node, service-role key)
   sitemap.mjs              runs after `vite build`: dist/sitemap.xml + robots.txt from published venues/events
@@ -155,6 +159,7 @@ README.md, DEPLOY.md       human docs
 | `/v/:slug` | VenuePage | `?tab=menu\|food\|photos\|reviews` (the "menu" tab is labelled Drinks; Food shows only when there's a food menu) |
 | `/events` | EventsPage | `?range=tonight\|week\|featured` selects the range chip |
 | `/events/:id` | EventPage | also loads past events and (for admins) drafts |
+| `/crawl` | CrawlPage | `?night=YYYY-MM-DD&from=&to=` (minutes after the night's midnight, past 1440 = next morning), `party`, `area`*, `vibe`*, `price`, `n` (stops), `mode=walk\|mix\|taxi`, `first=<venue id>`, `seed`, `near=1`, `stops=<ids>` (the chosen stops; reopens the same plan) |
 | `/community` | Community | `?kind=new_spot\|update\|closed\|event\|other&venue=<id>&field=menu\|photos\|hours\|phone` pre-fills the form |
 | `/account` | Account | `?mode=signup`, `?next=/path` (in-app paths only; validated by `safeNext`); `#activity` is the sharing switch |
 | `/manage/*` | ManagerApp | `/manage` (My venues), `/manage/v/:id` (own venues only; `#menu` etc. scroll to a panel), `/manage/events`, `/manage/events/new?venue=`, `/manage/events/:id`. Signed out → `/account?next=/manage` |
@@ -278,7 +283,7 @@ Only admins may change `reviews.is_hidden`. The `reviews_guard` trigger forces `
 ## Features (what each part does)
 
 ### Explore (`/`)
-- **Hero:** a `.neon-board` panel. A time-of-night greeting (Nassau time) with a matching one-tap suggestion (beach bars / waterfront / happy hour / dancing on Fri–Sat / live bands / open late; shown only if that tag exists). Headline "Nassau after dark." in flickering neon. Search + filters, quick buttons (Buzzing now, Open now, Near me, Events), live stats that are also shortcuts (spots → all spots, open now / buzzing → that filter via `apply()`, events tonight → `/events?range=tonight`), and a "Help light up the map" opt-in when location isn't on yet. On desktop: the **live board**, which shows the busiest venues now, else tonight's events, else the scene's venue types.
+- **Hero:** a `.neon-board` panel. A time-of-night greeting (Nassau time) with a matching one-tap suggestion (beach bars / waterfront / happy hour / dancing on Fri–Sat / live bands / open late; shown only if that tag exists). Headline "Nassau after dark." in flickering neon. Search + filters, quick buttons (Buzzing now, Open now, Near me, Events, Plan a crawl), live stats that are also shortcuts (spots → all spots, open now / buzzing → that filter via `apply()`, events tonight → `/events?range=tonight`), and a "Help light up the map" opt-in when location isn't on yet. On desktop: the **live board**, which shows the busiest venues now, else tonight's events, else the scene's venue types.
 - **Browse sections** (no search/filters): Happening tonight (events rail, live first), Buzzing right now (by `buzzScore`), venue-type tiles, Popular this month (30-day visits, 3+ needed), Open right now, Featured, Find your vibe, Fresh on the scene, neighbourhoods.
 - **All spots:** sort Top picks / **Buzzing** / **Popular** / Top rated (weighted `(avg·n + 3.5·3)/(n+3)`) / Nearest / A–Z / New; grid/list; removable chips. A note explains an empty Buzzing list (nobody sharing yet).
 - Tapping a tile or chip calls `apply()`, which **replaces** all filters with that one and scrolls to the results.
@@ -301,6 +306,13 @@ Ported from Island GO's map, on a dark basemap:
 - List grouped Live / Tonight / This week / Coming up, with range chips (Everything, Tonight, Next 7 days, Featured). Live cards get `.neon-edge` and a LIVE tag.
 - **Recurring nights** (`isRecurring`: weekly hours and a run longer than a day, or no end) are labelled "Every Fri · 10 PM", "Tonight · 10 PM · every Fri" or "… · until Nov 20". Sorting, "tonight" and "this week" use the **next session** (`nextSession` / `eventNextStart`), never `start_date`, which for a long-running weekly night is months old. The directory loads events with `end_date` null or in the future.
 - Detail: flyer hero (cropped banner, `image_url`), then the **flyers & videos** from `event_media` above About: the selected one large (a flyer uncropped, `max-h-[80vh]`, tap → `Lightbox`; a video inline with `preload="none"` and its poster), with a thumbnail strip when there are several (all open in the Lightbox, videos play there). Falls back to `image_url` when there are no rows (or the table is missing); images that fail to load are dropped, when (Nassau time; weekly schedule when set, recurring ones as "Every Friday" with since/until and only the nights it runs), price, tickets link, host venue card with its live level, directions, mini map, "On map" (`/map?event=`).
+
+### Bar crawl planner (`/crawl`, `lib/crawl.ts`)
+Phase 1 of [docs/bar-crawl.md](docs/bar-crawl.md) (read it before extending this; phases 2–3 are designed there):
+- Plans 2–6 stops in the browser from directory data: open while they're there (`openState` at arrival/leave), rating, own favourites, vibes, **usual crowd at that hour** (`venue_typical`, fetched for the night's two weekdays, paged), events on then (`isEventLive`), party size ("Group Friendly" vibe, roomy types; 8+ get "call ahead"), and an energy curve (bar → lounge → club). Beam search orders them; stays shrink (60/45 min) or stops drop when spots close early, with a note.
+- **Travel is estimated** (straight line × 1.35; walk 80 m/min; taxi 6 min + 400 m/min; walk ≤ 15 min in Walk + taxi, ≤ 22 min in Walk; taxi legs ≤ 22 min). **No drive mode** on purpose. Map lines are straight. Google Maps does turn-by-turn.
+- The request and chosen stop ids live in the URL (share = copy the link); GPS ("Start near me") is never put in it. Swap one stop, or "Try another route" (seeded shuffle that retries until the stops change).
+- Entry points: Explore hero "Plan a crawl", venue page "Plan a bar crawl starting here" (`?first=`). Listed in the sitemap.
 
 ### Live activity sharing (`components/ActivityConsent.tsx`)
 - `ActivityConsentCard` asks once, when location is on and consent is unset (not on `/account`). Nothing is sent until "Count me in".

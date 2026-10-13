@@ -2,10 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { MapContainer, Marker, TileLayer } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import {
-  ArrowLeft, CalendarHeart, Camera, Clock, ExternalLink, Globe, ImageOff, AtSign, ThumbsUp, Map as MapIcon,
-  MapPin, Martini, MessageSquarePlus, Navigation, Phone, Radio, Share2, Star, UtensilsCrossed,
-} from 'lucide-react';
+import { ArrowLeft, CalendarHeart, Camera, Clock, ExternalLink, Globe, ImageOff, AtSign, ThumbsUp, Map as MapIcon, MapPin, Martini, MessageSquarePlus, Navigation, Phone, Radio, Share2, Star, UtensilsCrossed, Route } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useDirectory } from '@/lib/directory';
 import { DAY_NAMES, dayLabel, hasHours, todayIndex } from '@/lib/hours';
@@ -296,6 +293,11 @@ export default function VenuePage() {
               </Link>
             )}
           </div>
+          {hasLocation(r) && r.is_published && (
+            <Link to={`/crawl?first=${r.id}`} className="mt-3 inline-flex items-center gap-1.5 text-sm font-extrabold text-brand-300 hover:text-brand-200">
+              <Route className="w-4 h-4" /> Plan a bar crawl starting here →
+            </Link>
+          )}
         </div>
 
         {/* Tabs */}
