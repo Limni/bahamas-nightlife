@@ -10,7 +10,7 @@
 // There is deliberately no "drive" mode: legs are walked or taken by taxi.
 
 import { getDistance } from './geo';
-import { nassauClock, openState, hasHours, timeToMinutes } from './hours';
+import { formatTime, nassauClock, openState, hasHours, timeToMinutes } from './hours';
 import { isEventLive } from './events';
 import type { NightEvent, RatingSummary, Venue, VenueActivity } from './types';
 
@@ -141,15 +141,31 @@ const WALK_ONLY_MAX_MIN = 22;
 /** Longest taxi ride between stops: further is a trip across the island, not a crawl. */
 const TAXI_MAX_MIN = 22;
 
-export function legBetween(a: { lat: number; lng: number }, b: { lat: number; lng: number }, mode: CrawlMode): Leg | null {
+type Point = { lat: number; lng: number };
+
+function estimate(a: Point, b: Point) {
   const metres = getDistance(a.lat, a.lng, b.lat, b.lng) * DETOUR;
-  const walk = Math.max(1, Math.round(metres / WALK_M_PER_MIN));
-  const taxi = Math.round(TAXI_WAIT_MIN + metres / TAXI_M_PER_MIN);
+  return { metres, walk: Math.max(1, Math.round(metres / WALK_M_PER_MIN)), taxi: Math.round(TAXI_WAIT_MIN + metres / TAXI_M_PER_MIN) };
+}
+
+/** A leg the planner may use, or null when it's too long for this way of getting around. */
+export function legBetween(a: Point, b: Point, mode: CrawlMode): Leg | null {
+  const { metres, walk, taxi } = estimate(a, b);
   if (mode === 'walk') return walk <= WALK_ONLY_MAX_MIN ? { mode: 'walk', minutes: walk, metres } : null;
   if (mode === 'taxi' && metres > 400) return taxi <= TAXI_MAX_MIN ? { mode: 'taxi', minutes: taxi, metres } : null;
   if (walk <= MAX_WALK_MIN || metres <= 400) return { mode: 'walk', minutes: walk, metres };
   return taxi <= TAXI_MAX_MIN ? { mode: 'taxi', minutes: taxi, metres } : null;
 }
+
+/** A leg on a route the visitor chose: always returned; long ones are flagged on the page (`isLongLeg`). */
+export function legForced(a: Point, b: Point, mode: CrawlMode): Leg {
+  const leg = legBetween(a, b, mode);
+  if (leg) return leg;
+  const { metres, walk, taxi } = estimate(a, b);
+  return mode === 'walk' ? { mode: 'walk', minutes: walk, metres } : { mode: 'taxi', minutes: taxi, metres };
+}
+
+export const isLongLeg = (leg: Leg) => leg.minutes > (leg.mode === 'walk' ? WALK_ONLY_MAX_MIN : TAXI_MAX_MIN);
 
 /**
  * Hassle of a leg in score points: minutes on the move, plus a fixed cost per
@@ -217,14 +233,25 @@ function closingAfter(v: Venue, t: number) {
 }
 
 /** How good `v` is as stop `index` of `count`, arriving at `arrive` and leaving at `leave`. Null = can't go. */
-function scoreStop(v: Venue, arrive: number, leave: number, index: number, count: number, req: CrawlRequest, ctx: CrawlContext): Scored | null {
+function scoreStop(
+  v: Venue, arrive: number, leave: number, index: number, count: number, req: CrawlRequest, ctx: CrawlContext,
+  /** false for a route the visitor chose: a closed spot gets a warning instead of being ruled out. */
+  strict = true,
+): Scored | null {
   const reasons: string[] = [];
   let warning: string | null = null;
   let score = 0;
 
   if (hasHours(v.hours)) {
-    if (openState(v.hours, arrive + 5 * 60_000).kind !== 'open') return null;
-    if (openState(v.hours, leave - 10 * 60_000).kind !== 'open') return null;
+    const atArrival = openState(v.hours, arrive + 5 * 60_000);
+    const nearLeaving = openState(v.hours, leave - 10 * 60_000);
+    if (strict && (atArrival.kind !== 'open' || nearLeaving.kind !== 'open')) return null;
+    if (atArrival.kind === 'closed') {
+      warning = `Closed at ${formatClock(arrive)}${atArrival.opensAt && atArrival.opensDay === nassauClock(arrive).dow ? `: opens ${formatTime(atArrival.opensAt)}` : ''}.`;
+    } else if (nearLeaving.kind !== 'open') {
+      const closes = closingAfter(v, arrive + 5 * 60_000);
+      warning = closes ? `Closes at ${formatClock(closes)}.` : null;
+    }
   } else {
     score -= 1.5;
     warning = 'Hours aren’t listed: call ahead.';
@@ -384,11 +411,59 @@ export function planCrawl(req: CrawlRequest, ctx: CrawlContext): PlanResult {
   return { plan: null, reason: 'Not enough spots are open then. Try other times, more areas, or any budget.' };
 }
 
-/** Rebuild a shared plan from its stop ids (times recomputed). Null if a spot is gone or closed. */
-export function planFromIds(ids: string[], req: CrawlRequest, ctx: CrawlContext): CrawlPlan | null {
-  const pool = ctx.venues.filter((v) => ids.includes(v.id) && v.lat != null && v.lng != null);
-  if (pool.length !== ids.length) return null;
-  return search(req, ctx, ids.length, pool, ids);
+/** Stops a hand-picked crawl can have (Google Maps takes up to 9 waypoints). */
+export const MAX_CUSTOM_STOPS = 8;
+
+/**
+ * Time a route through exactly these spots, in this order: a crawl the
+ * visitor picked, or a shared link (which must reopen as sent, even if a
+ * spot has since closed). Closed spots and long legs are flagged, not dropped.
+ * Null when none of the spots is on the map.
+ */
+export function planCustom(ids: string[], req: CrawlRequest, ctx: CrawlContext): CrawlPlan | null {
+  const venues = ids.map((id) => ctx.venues.find((v) => v.id === id)).filter((v): v is Venue => !!v && v.lat != null && v.lng != null);
+  if (venues.length === 0) return null;
+  const start = nassauTime(req.night, req.start);
+  const end = nassauTime(req.night, req.end);
+  const pos = venues.map((v) => ({ lat: v.lat!, lng: v.lng! }));
+  const legs = pos.map((p, i) => (i === 0 ? (req.origin ? legForced(req.origin, p, req.mode) : null) : legForced(pos[i - 1], p, req.mode)));
+  const travel = legs.slice(1).reduce((n, l) => n + (l?.minutes ?? 0), 0);
+  const dwell = Math.max(20, Math.min(180, (req.end - req.start - travel) / venues.length)) * 60_000;
+  const stops: CrawlStop[] = [];
+  let depart = start;
+  venues.forEach((v, i) => {
+    const arrive = i === 0 ? start : ceil5(depart + (legs[i]?.minutes ?? 0) * 60_000);
+    const leave = i === venues.length - 1 ? Math.max(end, arrive + 30 * 60_000) : ceil5(arrive + dwell);
+    const scored = scoreStop(v, arrive, leave, i, venues.length, req, ctx, false)!;
+    stops.push({ venue: v, arrive, leave, reasons: scored.reasons, event: scored.event, warning: scored.warning, legIn: legs[i] });
+    depart = leave;
+  });
+  return { stops, start, end };
+}
+
+/**
+ * The shortest way round: keeps the first stop and tries every order of the
+ * rest (at most 7! = 5040 for 8 stops, instant).
+ */
+export function bestOrder(ids: string[], ctx: CrawlContext, mode: CrawlMode): string[] {
+  const venues = ids.map((id) => ctx.venues.find((v) => v.id === id)).filter((v): v is Venue => !!v && v.lat != null);
+  if (venues.length < 3) return ids;
+  const [first, ...rest] = venues;
+  const cost = (a: Venue, b: Venue) => legCost(legForced({ lat: a.lat!, lng: a.lng! }, { lat: b.lat!, lng: b.lng! }, mode));
+  let best = rest;
+  let bestCost = Infinity;
+  const permute = (done: Venue[], left: Venue[], sum: number) => {
+    if (sum >= bestCost) return;
+    if (left.length === 0) {
+      best = done;
+      bestCost = sum;
+      return;
+    }
+    const prev = done[done.length - 1] ?? first;
+    left.forEach((v, i) => permute([...done, v], [...left.slice(0, i), ...left.slice(i + 1)], sum + cost(prev, v)));
+  };
+  permute([], rest, 0);
+  return [first, ...best].map((v) => v.id);
 }
 
 /**

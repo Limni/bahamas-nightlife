@@ -67,7 +67,7 @@ src/
     activity.tsx           ActivityProvider/useActivity: consent, nightly device id, presence pings,
                            venue_activity() fetch + Realtime; heatFor()/HEAT_META levels; usePopularTimes()
     crawl.ts               bar crawl planner: candidates, scoring at arrival time, beam search, travel estimates,
-                           swapStop, planFromIds (shared links), googleMapsUrl, Nassau wall-clock helpers
+                           swapStop, planCustom (hand-picked + shared links), bestOrder, googleMapsUrl, Nassau time helpers
     events.ts              isEventLive/Ended/Soon, nextSession/eventNextStart, isRecurring/recurrenceLabel,
                            eventPosition (own pin or venue's), eventWhen labels
     filters.tsx            FiltersProvider + matchesFilters()
@@ -159,7 +159,7 @@ README.md, DEPLOY.md       human docs
 | `/v/:slug` | VenuePage | `?tab=menu\|food\|photos\|reviews` (the "menu" tab is labelled Drinks; Food shows only when there's a food menu) |
 | `/events` | EventsPage | `?range=tonight\|week\|featured` selects the range chip |
 | `/events/:id` | EventPage | also loads past events and (for admins) drafts |
-| `/crawl` | CrawlPage | `?night=YYYY-MM-DD&from=&to=` (minutes after the night's midnight, past 1440 = next morning), `party`, `area`*, `vibe`*, `price`, `n` (stops), `mode=walk\|mix\|taxi`, `first=<venue id>`, `seed`, `near=1`, `stops=<ids>` (the chosen stops; reopens the same plan) |
+| `/crawl` | CrawlPage | `?night=YYYY-MM-DD&from=&to=` (minutes after the night's midnight, past 1440 = next morning), `party`, `area`*, `vibe`*, `price`, `n` (stops), `mode=walk\|mix\|taxi`, `first=<venue id>`, `seed`, `pick=1` (hand-picked), `stops=<ids>` (reopens exactly these stops in this order; someone else's link opens as "shared with you"). "Start near me" is never in the URL |
 | `/community` | Community | `?kind=new_spot\|update\|closed\|event\|other&venue=<id>&field=menu\|photos\|hours\|phone` pre-fills the form |
 | `/account` | Account | `?mode=signup`, `?next=/path` (in-app paths only; validated by `safeNext`); `#activity` is the sharing switch |
 | `/manage/*` | ManagerApp | `/manage` (My venues), `/manage/v/:id` (own venues only; `#menu` etc. scroll to a panel), `/manage/events`, `/manage/events/new?venue=`, `/manage/events/:id`. Signed out → `/account?next=/manage` |
@@ -311,7 +311,9 @@ Ported from Island GO's map, on a dark basemap:
 Phase 1 of [docs/bar-crawl.md](docs/bar-crawl.md) (read it before extending this; phases 2–3 are designed there):
 - Plans 2–6 stops in the browser from directory data: open while they're there (`openState` at arrival/leave), rating, own favourites, vibes, **usual crowd at that hour** (`venue_typical`, fetched for the night's two weekdays, paged), events on then (`isEventLive`), party size ("Group Friendly" vibe, roomy types; 8+ get "call ahead"), and an energy curve (bar → lounge → club). Beam search orders them; stays shrink (60/45 min) or stops drop when spots close early, with a note.
 - **Travel is estimated** (straight line × 1.35; walk 80 m/min; taxi 6 min + 400 m/min; walk ≤ 15 min in Walk + taxi, ≤ 22 min in Walk; taxi legs ≤ 22 min). **No drive mode** on purpose. Map lines are straight. Google Maps does turn-by-turn.
-- The request and chosen stop ids live in the URL (share = copy the link); GPS ("Start near me") is never put in it. Swap one stop, or "Try another route" (seeded shuffle that retries until the stops change).
+- **Pick my own spots** tab: search and add up to 8 spots (favourites offered as quick adds), reorder, **Optimise order** (`bestOrder`: keeps the first stop, tries every order of the rest for the least travel), **Build my route** (`planCustom`: times the route in exactly that order; closed-then spots and long walks/rides are flagged, not dropped). An auto plan's **Edit these stops** moves it into this tab.
+- The request and chosen stop ids live in the URL (share = copy the link); GPS ("Start near me") is never put in it, so a recipient is never asked for their location. Swap one stop, or "Try another route" (seeded shuffle that retries until the stops change).
+- **Shared links** always reopen exactly the shared stops (`planCustom`, times recomputed; spots no longer listed are dropped with a note). Opened by someone else (the planning tab keeps `sessionStorage` `crawl:mine`), the page shows just the plan, Directions and Share, with **Create your own crawl** at the bottom, which opens the planner.
 - Entry points: Explore hero "Plan a crawl", venue page "Plan a bar crawl starting here" (`?first=`). Listed in the sitemap.
 
 ### Live activity sharing (`components/ActivityConsent.tsx`)

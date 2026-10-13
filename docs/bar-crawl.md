@@ -28,11 +28,14 @@ Everything runs in the browser from data the directory already loads, so there's
   - Leg cost = 0.08/min + 1.2 per taxi, so crawls cluster unless a spot is worth the ride.
 - **Shuffle** ("Try another route") adds seeded random weight to the scores (`seed` > 0) and retries until the stops change. **Swap** replaces one stop with the next-best spot that fits there, keeping the others.
 
+**Pick my own spots** (tab): search and add up to 8 spots (`MAX_CUSTOM_STOPS`, so Google Maps' waypoint limit holds), with favourites offered as quick adds. Reorder them, or **Optimise order** (`bestOrder`: keeps the first stop and brute-forces the rest for the least travel; it ignores opening hours). **Build my route** (`planCustom`) times them in exactly that order, and flags closed-at-that-time spots ("Closed at 1 AM: opens 11 AM", "Closes at 12 AM") and long walks/rides instead of refusing. An auto plan can be handed over with **Edit these stops**.
+
 **Output:**
 - a timeline with arrive/leave times, "why this one" chips (event, usual crowd, favourite, rating, vibes, group friendly) and walk/taxi legs;
 - a Leaflet map with numbered pins and **straight** dashed (walk) / solid (taxi) lines;
 - **Directions in Google Maps** (all stops as waypoints; walking if every leg is a walk, else driving, i.e. the taxi route);
-- **Share**: the whole request and the chosen stop ids live in the URL (`night, from, to, party, area*, vibe*, price, n, mode, first, seed, near, stops`), so a shared link reopens the same plan (times recomputed; if a stop is gone or closed, it re-plans).
+- **Share**: the whole request and the chosen stop ids live in the URL (`night, from, to, party, area*, vibe*, price, n, mode, first, seed, pick, stops`). "Start near me" is deliberately left out, so a recipient is never asked for their location. A shared link reopens **exactly** those stops in that order (`planCustom`; times recomputed, spots no longer listed dropped with a note).
+- **Shared view:** a link opened by someone other than its planner (the planning tab remembers its stops in `sessionStorage` `crawl:mine`) shows only the plan, Directions and Share, plus a **Create your own crawl** button underneath that opens the planner.
 
 **Known limits of phase 1:**
 - Times and distances are estimates. Harbour crossings (Paradise Island bridges) and one-way streets aren't modelled.
@@ -85,6 +88,7 @@ The public OSRM demo server (`router.project-osrm.org`) is for testing only, not
 
 ## Phase 3: extras (proposed)
 
+- **Smarter "Optimise order"** for hand-picked spots: weigh opening hours and the energy curve, not just travel (`planCustom` per permutation is cheap enough at ≤ 8 stops).
 - **Saved crawls:** a `crawls` table `(id, user_id, title, request jsonb, stop_ids uuid[], created_at)` with RLS (own rows only), "Save" on the plan, and a **My crawls** list on `/account` next to My favourites. Shared links keep working without saving.
 - **Free-text requests:** "plan a crawl for 6 on Bay Street Friday from 9, no clubs". A Supabase Edge Function calls an LLM to turn the sentence into the `CrawlRequest` fields (JSON-schema output), and optionally writes a short, fun summary of the finished plan. The API key lives in Edge Function secrets. The route itself stays our deterministic planner (reliable, free). Cost is a fraction of a cent per request; rate-limit per IP.
 - **Live crawl mode:** while a saved/shared crawl is open on the night, use the existing presence data (`here` from `ActivityProvider`, when sharing is on) to show "You're at stop 2 · next: X in 8 min walk", and nudge if running late (re-time the remaining stops).
