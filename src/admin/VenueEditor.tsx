@@ -14,6 +14,7 @@ import { PhotoManager } from './PhotoManager';
 import { MenuEditor } from './MenuEditor';
 import { useConsole } from './console';
 import { VenueManagersPanel } from './VenueManagers';
+import { FavoriteCount, useFavoriteCounts } from './favorites';
 
 interface Form {
   name: string;
@@ -78,6 +79,7 @@ export default function VenueEditor() {
   const { toast, confirm } = useFeedback();
   const { role, base } = useConsole();
   const isAdmin = role === 'admin';
+  const favorites = useFavoriteCounts();
   const [venue, setVenue] = useState<Venue | null>(null);
   const [form, setForm] = useState<Form | null>(null);
   const [saved, setSaved] = useState<Form | null>(null);
@@ -235,9 +237,12 @@ export default function VenueEditor() {
             <ArrowLeft className="w-4 h-4" /> {isAdmin ? 'Spots' : 'My venues'}
           </Link>
           <h1 className="text-2xl font-black text-slate-900 truncate">{venue.name}</h1>
-          <span className={`inline-block mt-1 px-2 py-0.5 rounded-md text-[11px] font-extrabold uppercase ${venue.is_published ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>
-            {venue.is_published ? 'Live' : 'Draft'}
-          </span>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className={`inline-block px-2 py-0.5 rounded-md text-[11px] font-extrabold uppercase ${venue.is_published ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>
+              {venue.is_published ? 'Live' : 'Draft'}
+            </span>
+            {favorites && <FavoriteCount count={favorites[venue.id] ?? 0} className="text-sm" />}
+          </div>
         </div>
         <a href={`/v/${venue.slug}`} target="_blank" rel="noreferrer" className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 text-sm font-bold text-slate-700 hover:bg-slate-50">
           <ExternalLink className="w-4 h-4" /> View

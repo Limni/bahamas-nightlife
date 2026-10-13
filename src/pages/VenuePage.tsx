@@ -17,6 +17,7 @@ import { useActivity } from '@/lib/activity';
 import { compareEvents, isEventEnded } from '@/lib/events';
 import { Lightbox, type LightboxImage } from '@/components/Lightbox';
 import { MediaStill, toLightbox } from '@/components/Media';
+import { FavoriteButton } from '@/components/FavoriteButton';
 import { EmptyState, HeatBadge, OpenBadge, Price, SafeImg, Spinner, Stars } from '@/components/ui';
 import { ReviewsSection } from '@/components/Reviews';
 import { TabBar } from '@/components/TabBar';
@@ -215,9 +216,12 @@ export default function VenuePage() {
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <button onClick={share} className="w-11 h-11 rounded-full bg-night-900/90 backdrop-blur text-night-100 flex items-center justify-center shadow-lg hover:bg-night-900" aria-label="Share">
-            <Share2 className="w-5 h-5" />
-          </button>
+          <div className="flex gap-2">
+            {r.is_published && <FavoriteButton venueId={r.id} name={r.name} variant="hero" />}
+            <button onClick={share} className="w-11 h-11 rounded-full bg-night-900/90 backdrop-blur text-night-100 flex items-center justify-center shadow-lg hover:bg-night-900" aria-label="Share">
+              <Share2 className="w-5 h-5" />
+            </button>
+          </div>
         </div>
         {gallery.length > 0 && (
           <button

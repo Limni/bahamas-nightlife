@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence, useMotionValue, animate } from 'motion/react';
 import { X, MapPin, Navigation, Phone, ChevronRight, Star, Clock, PartyPopper } from 'lucide-react';
+import { FavoriteButton } from './FavoriteButton';
 import type { NightEvent, Venue } from '@/lib/types';
 import { isFeatured } from '@/lib/types';
 import { directionsUrl, formatDistance, getDistance } from '@/lib/geo';
@@ -189,6 +190,7 @@ export function VenueDrawer({
                 <span className="text-xs font-bold text-emerald-300 mt-0.5">Call</span>
               </a>
             )}
+            <FavoriteButton venueId={r.id} name={r.name} variant="tile" />
             <Link to={`/v/${r.slug}`} className={primaryAction}>
               Details & drinks <ChevronRight className="w-5 h-5" />
             </Link>

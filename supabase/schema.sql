@@ -1705,3 +1705,56 @@ select e.id, 'image', e.image_url, e.image_path, 1
 from public.events e
 where e.image_url is not null
   and not exists (select 1 from public.event_media m where m.event_id = e.id);
+
+-- =============================================================================
+-- Favourites: members save spots to a list on their Account page.
+--
+-- Each member sees only their own rows. Nobody else can tell who favourited
+-- what: admins (all spots) and venue managers (their own spots) get totals
+-- only, from venue_favorite_counts().
+-- =============================================================================
+create table if not exists public.venue_favorites (
+  venue_id   uuid not null references public.venues (id) on delete cascade,
+  user_id    uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (venue_id, user_id)
+);
+
+create index if not exists venue_favorites_user_idx on public.venue_favorites (user_id, created_at desc);
+
+alter table public.venue_favorites enable row level security;
+
+drop policy if exists "Members see their own favourites" on public.venue_favorites;
+create policy "Members see their own favourites" on public.venue_favorites
+  for select using (user_id = auth.uid() or public.is_admin());
+
+drop policy if exists "Members favourite published spots" on public.venue_favorites;
+create policy "Members favourite published spots" on public.venue_favorites
+  for insert to authenticated
+  with check (
+    user_id = auth.uid()
+    and not public.is_suspended()
+    and exists (select 1 from public.venues v where v.id = venue_id and v.is_published)
+  );
+
+drop policy if exists "Members remove their own favourites" on public.venue_favorites;
+create policy "Members remove their own favourites" on public.venue_favorites
+  for delete using (user_id = auth.uid() or public.is_admin());
+
+-- How many members have favourited each spot: every spot for admins, a
+-- manager's own spots for managers, nothing for anyone else.
+create or replace function public.venue_favorite_counts()
+returns table (venue_id uuid, favorites bigint)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select f.venue_id, count(*)
+  from public.venue_favorites f
+  where public.is_admin() or public.is_venue_manager(f.venue_id)
+  group by f.venue_id;
+$$;
+
+revoke execute on function public.venue_favorite_counts() from public, anon;
+grant execute on function public.venue_favorite_counts() to authenticated;

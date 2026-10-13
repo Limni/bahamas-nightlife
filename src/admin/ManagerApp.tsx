@@ -10,6 +10,7 @@ import { SetupNotice } from '@/components/SetupNotice';
 import { SafeImg, Spinner } from '@/components/ui';
 import { FeedbackProvider } from './ui';
 import { ConsoleProvider, type ConsoleScope } from './console';
+import { FavoriteCount, useFavoriteCounts } from './favorites';
 import VenueEditor from './VenueEditor';
 import EventsList from './EventsList';
 import EventEditor from './EventEditor';
@@ -165,6 +166,7 @@ function OwnVenue({ ids }: { ids: string[] }) {
 function MyVenues({ venues, reload }: { venues: Venue[]; reload: () => void }) {
   const { ratings, events } = useDirectory();
   const { heatOf } = useActivity();
+  const favorites = useFavoriteCounts();
   // Pick up name/cover changes made in the editor.
   useEffect(() => {
     reload();
@@ -200,6 +202,7 @@ function MyVenues({ venues, reload }: { venues: Venue[]; reload: () => void }) {
                     <span>{rating?.rating_count ? `★ ${rating.rating_avg.toFixed(1)} · ${rating.rating_count} reviews` : 'No reviews yet'}</span>
                     {heat.level !== 'quiet' && <span style={{ color: heat.color }}>● {heat.label} now</span>}
                     <span>{upcoming ? `${upcoming} upcoming event${upcoming === 1 ? '' : 's'}` : 'No upcoming events'}</span>
+                    {favorites && <FavoriteCount count={favorites[v.id] ?? 0} />}
                   </p>
                 </div>
               </div>

@@ -4,6 +4,7 @@ import { DirectoryProvider, LocationProvider } from '@/lib/directory';
 import { ActivityProvider } from '@/lib/activity';
 import { FiltersProvider } from '@/lib/filters';
 import { AuthProvider } from '@/lib/auth';
+import { FavoritesProvider } from '@/lib/favorites';
 import { ThemeProvider } from '@/lib/theme';
 import { Layout } from '@/components/Layout';
 import { Spinner } from '@/components/ui';
@@ -41,6 +42,7 @@ export default function App() {
       <ScrollToTop />
       <ThemeProvider>
       <AuthProvider>
+      <FavoritesProvider>
       <DirectoryProvider>
         <LocationProvider>
           <ActivityProvider>
@@ -65,6 +67,7 @@ export default function App() {
           </ActivityProvider>
         </LocationProvider>
       </DirectoryProvider>
+      </FavoritesProvider>
       </AuthProvider>
       </ThemeProvider>
     </BrowserRouter>

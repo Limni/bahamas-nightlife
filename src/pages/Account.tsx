@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, ChevronRight, Clock, KeyRound, Loader2, LogOut, MailCheck, MessageSquarePlus, PartyPopper, Pencil, Shield, Star, Store, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Heart, ChevronRight, Clock, KeyRound, Loader2, LogOut, MailCheck, MessageSquarePlus, PartyPopper, Pencil, Shield, Star, Store, XCircle } from 'lucide-react';
 import { authLinkError, supabase, supabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
 import { SUBMISSION_KIND_LABELS, type SubmissionKind, type SubmissionStatus } from '@/lib/types';
 import { SetupNotice } from '@/components/SetupNotice';
 import { SafeImg, Spinner, Stars } from '@/components/ui';
 import { ActivitySharingToggle } from '@/components/ActivityConsent';
+import { VenueRow } from '@/components/VenueCard';
+import { useFavorites } from '@/lib/favorites';
+import { useDirectory } from '@/lib/directory';
+import { useNow } from '@/lib/useNow';
 
 const input =
   'w-full px-4 py-3 rounded-2xl border border-white/10 bg-night-950/70 outline-none focus:border-brand-400 font-semibold text-white placeholder:text-night-500';
@@ -374,6 +378,8 @@ function SignedIn() {
         </section>
       )}
 
+      <MyFavorites />
+
       <section className="bg-night-900 rounded-[1.75rem] border border-white/10 p-5 md:p-6">
         <h2 className="flex items-center gap-2 font-display text-xl font-bold text-white mb-4">
           <Star className="w-5 h-5 text-amber-400" /> My reviews
@@ -476,5 +482,39 @@ export default function Account() {
         <ActivitySharingToggle />
       </div>
     </>
+  );
+}
+
+/** The member's favourite spots, most recently added first. Unhearting one removes it here too. */
+function MyFavorites() {
+  const { available, ids } = useFavorites();
+  const { venueById, loading } = useDirectory();
+  const now = useNow();
+  if (!available) return null;
+  // Spots taken down since (unpublished or deleted) aren't in the directory, so they drop out.
+  const spots = ids.map((id) => venueById.get(id)).filter((v) => !!v);
+  return (
+    <section className="bg-night-900 rounded-[1.75rem] border border-white/10 p-5 md:p-6">
+      <h2 className="flex items-center gap-2 font-display text-xl font-bold text-white mb-4">
+        <Heart className="w-5 h-5 text-brand-400 fill-brand-400/40" /> My favourites
+        {spots.length > 0 && <span className="text-base text-night-300">{spots.length}</span>}
+      </h2>
+      {loading && spots.length === 0 ? (
+        <Spinner />
+      ) : spots.length === 0 ? (
+        <p className="text-sm font-semibold text-night-300">
+          Tap the <Heart className="inline w-4 h-4 -mt-0.5 text-brand-300" /> on any spot to keep it here for your next night out.{' '}
+          <Link to="/" className="text-brand-300 font-extrabold">Explore spots →</Link>
+        </p>
+      ) : (
+        <ul className="grid grid-cols-1 gap-2">
+          {spots.map((v) => (
+            <li key={v.id}>
+              <VenueRow r={v} now={now} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

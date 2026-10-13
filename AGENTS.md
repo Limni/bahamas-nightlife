@@ -63,6 +63,7 @@ src/
     supabase.ts            client + `supabaseConfigured` flag + bucket names
     auth.tsx               AuthProvider/useAuth — member accounts (session, profile, isAdmin)
     directory.tsx          DirectoryProvider (venues, upcoming events, tags, ratings) + LocationProvider
+    favorites.tsx          FavoritesProvider/useFavorites: the member's favourite spot ids, toggle, signed-out prompt
     activity.tsx           ActivityProvider/useActivity: consent, nightly device id, presence pings,
                            venue_activity() fetch + Realtime; heatFor()/HEAT_META levels; usePopularTimes()
     events.ts              isEventLive/Ended/Soon, nextSession/eventNextStart, isRecurring/recurrenceLabel,
@@ -94,6 +95,7 @@ src/
     Reviews.tsx            ReviewsSection (summary, own review form, list)
     Lightbox.tsx           full-screen photo/video viewer
     Media.tsx              MediaStill (photo, or video poster + play badge), VideoBadge, toLightbox
+    FavoriteButton.tsx     heart that saves a spot to favourites (overlay / hero / tile variants)
     SetupNotice.tsx        shown when Supabase env vars are missing
   pages/
     Explore.tsx            "/" landing + directory
@@ -119,6 +121,7 @@ src/
     PhotoManager.tsx       gallery/menu photo upload (+ short videos in the gallery), reorder, caption, cover, delete
     MediaUpload.tsx        useMediaUploader + MediaProgress: batch photo/video upload with progress, shared by both
     video.ts               ffmpeg.wasm video optimiser (prepareVideo) and uploadMediaFile()
+    favorites.tsx          useFavoriteCounts (venue_favorite_counts RPC) + FavoriteCount badge
     MenuEditor.tsx         menu items + paste-a-menu parser (parseMenuText)
     LocationField.tsx      map pin, GPS, paste Google Maps link (parseCoordinates)
     HoursEditor.tsx        7-day hours editor
@@ -160,7 +163,7 @@ README.md, DEPLOY.md       human docs
 
 Public pages render inside `<Layout/>` (5 tabs: Explore, Map, Events, Community, Account). `/admin` does not; it has its own light shell. The admin console is reachable **only by URL**, except an "Admin console" button on `/account` for admins. `/manage` has its own light shell too, linked from a **Venue manager** card on `/account` for members who manage a venue.
 
-Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > DirectoryProvider > LocationProvider > ActivityProvider > FiltersProvider > Suspense > Routes`.
+Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > FavoritesProvider > DirectoryProvider > LocationProvider > ActivityProvider > FiltersProvider > Suspense > Routes`.
 
 ## Data layer (client)
 
@@ -170,6 +173,7 @@ Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > Dir
   - Events are optional: without the table the app works with none.
   - `refreshRatings()` re-fetches only the rating summaries. Call it after a review changes.
   - Ratings are optional: if the view doesn't exist (migration not run), the app still works.
+- **`FavoritesProvider`** (`lib/favorites.tsx`) loads the signed-in member's `venue_favorites` ids (most recent first; RLS returns only their own) and toggles them optimistically (23505 = already saved, kept; any other error reverts). The same query run signed out tells it whether the table exists (`available`; hearts hide until the schema is re-run). A signed-out tap shows a fixed sign-in prompt and remembers the spot in `sessionStorage` `favorites:pending`, saved as soon as they sign in (cleared if they dismiss the prompt).
 - **`LocationProvider`** starts a single `watchPosition` when something calls `enable()` (the map on mount, or "Near me"), or automatically if permission was already granted.
 - **`ActivityProvider`** (`lib/activity.tsx`) is the live-activity client:
   - **Consent** in `localStorage` `activity:consent` (`on`/`off`; null = not asked). Nothing is sent before `on`. Turning it on calls the location `enable()`.
@@ -202,6 +206,7 @@ Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > Dir
 | `event_media` | an event's flyers + short videos | `event_id` (cascade), `media_type`, `url`, `storage_path`, `poster_url`/`poster_path`, `duration_s`, `caption ≤200`, `sort`. Trigger `event_media_sync` (security definer) keeps `events.image_url`/`image_path` = the first image by sort, else the first video's poster. Existing single flyers were copied in once by `schema.sql` |
 | `menu_items` | structured menus | **`menu 'drinks'\|'food'`** (added later; existing items were sorted once by food-sounding section names), `section`, `name`, `description`, `price numeric(10,2)`, `sort`, `photo_url`/`photo_path` (one optional photo, `<venue_id>/items/…`), **`like_count`** (kept by a security-definer trigger on `menu_item_likes`; re-running the schema recounts) |
 | `venue_managers` | who manages which venue | `(venue_id, user_id)` PK (a member can manage several venues, a venue can have several managers), `created_by`, `created_at`. Cascades with the venue and the auth user |
+| `venue_favorites` | members' favourite spots | `(venue_id, user_id)` PK, `user_id` default `auth.uid()` → `profiles`, `created_at`. Cascades with the venue and the member. Totals only via `venue_favorite_counts()` |
 | `menu_item_likes` | likes on menu items | `(item_id, user_id)` PK (one like per member per item), `user_id` default `auth.uid()` → `profiles`, `created_at`. Cascades with the item and the member |
 | `tags` | filter vocabularies | `kind 'category'\|'vibe'\|'area'`, `label`, `sort`; unique `(kind,label)`; seeded with starter values |
 | `submissions` | community suggestions | `kind 'new_spot'\|'update'\|'closed'\|'event'\|'other'`, `venue_id`, `venue_name`, `fields text[]`, `message`, `contact_name`, `contact_email`, `credit_ok`, `photo_paths text[]` (≤6), `status 'new'\|'reviewing'\|'done'\|'dismissed'`, `admin_note` (private), `resolved_at` (trigger-set), `user_id` (default `auth.uid()`, null for anonymous) |
@@ -231,6 +236,7 @@ Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > Dir
 | `presence` | nobody | only `report_presence()` / housekeeping (security definer) |
 | `venue_live`, `venue_typical`, `venue_stats` | everyone (aggregates only) | only the activity functions |
 | `venue_hourly` | admins | only the activity functions |
+| `venue_favorites` | own rows only (+ admins); totals for admins (all spots) and managers (their spots) via `venue_favorite_counts()` | members insert their own on **published** spots (not while suspended) and delete their own; admins delete |
 | `menu_item_likes` | own rows only (+ admins); the public sees `menu_items.like_count` | members insert their own on items of **published** spots (not while suspended) and delete their own; admins delete |
 | `reviews` | non-hidden for everyone; own (even hidden) for the author; all for admins | members insert their own on **published** spots (not while suspended); authors (not while suspended) and admins update; authors and admins delete |
 
@@ -250,6 +256,7 @@ Only admins may change `reviews.is_hidden`. The `reviews_guard` trigger forces `
   - `admin_confirm_user(p_user)`: sets `email_confirmed_at` when the confirmation email never arrived.
   - `admin_delete_user(p_user)`: clears their `storage.objects` ownership (Auth refuses to delete users who own objects; the suggestion photos stay), then deletes from `auth.users`. Profile and reviews cascade; suggestions stay, unlinked. Not yourself, not an admin.
   - `admin_list_users` also returns `invited_at` and takes `p_filter = 'invited'` (invited, not yet accepted). Its result columns changed once, so `schema.sql` drops it before creating it.
+- **Favourites:** `venue_favorite_counts()` (security definer) → `venue_id, favorites`: every spot for admins, the caller's managed spots for managers, nothing for others. Execute revoked from `public`/`anon`. Never returns who favourited.
 - **Venue managers:** `is_venue_manager(p_venue)`, `can_manage_media(p_name)` (storage policies), `is_restricted_writer()` (an `anon`/`authenticated` caller who isn't an admin; the guard triggers use it, so security-definer functions, the service role and the SQL editor pass), and `admin_venue_managers(p_venue)` → `user_id, email, display_name, created_at` (admins only). `admin_list_users` also returns `venue_count` and takes `p_filter = 'managers'`.
 - **Edge Function `invite-member`** (`supabase/functions/invite-member/index.ts`, deployed by the owner; "Verify JWT" on). Body `{ email, display_name?, make_admin?, redirect_to? }`. It checks `is_admin()` **with the caller's token**, then uses the service-role key (only ever inside the function) for `auth.admin.generateLink({ type: 'invite' })`: that creates the account and the one-time accept link **without Supabase sending anything**. Supabase's own invite email isn't used because the free plan can't edit templates (and its mailer only reaches the project team). User metadata: `display_name` (→ the profile via `handle_new_user`) and `invited_by` (the inviter's display name). `make_admin` also inserts into `admins`. If secrets `RESEND_API_KEY` + `INVITE_FROM` are set it emails our styled invitation (`inviteEmail()` in the same file: inline styles + tables, HTML-escaped names, plain-text part) via the Resend API → `{ user_id, emailed: true }`; otherwise, or if sending fails, `{ user_id, emailed: false, link, warning? }` and the admin shares the link. 403 non-admin, 400 bad email, 409 already registered; re-inviting someone who hasn't accepted makes a fresh link.
 - **Activity** (all security definer):
@@ -301,6 +308,11 @@ Ported from Island GO's map, on a dark basemap:
 - `HereBanner` thanks the visitor while they're counted at a venue (hidden on `/map`).
 - The privacy copy states the rules (venue only, nightly ID, ≥ 2 people). Keep it true if the SQL changes.
 
+### Favourites (`lib/favorites.tsx`, `components/FavoriteButton.tsx`)
+- A heart on every spot card (`VenueCard` photo corner, `VenueRow` right edge; a sibling of the card's link, never inside it), beside Share on the venue page hero (published spots only), and a **Save** tile in the map drawer.
+- `/account` → **My favourites** (above My reviews): `VenueRow`s, most recently saved first; spots since unpublished or deleted drop out (they're not in the directory). Un-hearting removes one.
+- Admins see **♥ n** on each Spots row and "n favourites" in the spot editor header; managers see the count on their venue cards and in the editor (`useFavoriteCounts`). Who favourited is never shown.
+
 ### Reviews (`components/Reviews.tsx`)
 - Average plus a 5→1 distribution, computed from loaded visible reviews. The directory's `venue_ratings` drives the badges elsewhere.
 - Your own review shows first with Edit and Delete, and a notice if a moderator hid it. Otherwise you get the star picker and comment form.
@@ -316,7 +328,7 @@ Ported from Island GO's map, on a dark basemap:
 - Sign in / Create account (display name, 8+ character password) / Forgot password, then a "Choose a new password" screen when `recovering`.
 - With email confirmation on (the Supabase default), sign-up shows "Check your email". Email links redirect to `/account`.
 - Arriving from an **invitation** link: "Welcome to Nassau Nights", with name (pre-filled from the invite) + password, then the signed-in view. An expired or used email link shows a notice above the sign-in form.
-- Signed in: avatar initial, editable display name, email (shown privately), Admin console link (admins), Sign out, **My reviews**, and **My suggestions** with status (Received / In progress / Applied / Not applied).
+- Signed in: avatar initial, editable display name, email (shown privately), Admin console link (admins), Sign out, **My favourites**, **My reviews**, and **My suggestions** with status (Received / In progress / Applied / Not applied).
 
 ### Venue manager (`/manage`)
 - An admin assigns members to venues (spot editor → **Managers**: search members, add/remove; or Members → a member → **Venues they manage**). A member can manage several venues.

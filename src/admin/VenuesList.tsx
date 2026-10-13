@@ -6,6 +6,7 @@ import { hasHours } from '@/lib/hours';
 import { isFeatured, type Venue } from '@/lib/types';
 import { Spinner } from '@/components/ui';
 import { inputClass } from './ui';
+import { FavoriteCount, useFavoriteCounts } from './favorites';
 
 type Row = Venue & {
   venue_photos: { count: number }[];
@@ -43,6 +44,7 @@ export default function VenuesList() {
   const [menuPhotoCounts, setMenuPhotoCounts] = useState<Record<string, number>>({});
   const [query, setQuery] = useState('');
   const [view, setView] = useState<View>('all');
+  const favorites = useFavoriteCounts();
 
   useEffect(() => {
     supabase
@@ -168,13 +170,16 @@ export default function VenuesList() {
                       <Gap on={menuMissing} icon={<Martini className="w-3 h-3" />} label="Drinks" />
                     </div>
                   </div>
+                  <div className="shrink-0 flex flex-col items-end gap-1.5">
                   <span
-                    className={`shrink-0 px-2 py-1 rounded-lg text-[11px] font-extrabold uppercase ${
+                    className={`px-2 py-1 rounded-lg text-[11px] font-extrabold uppercase ${
                       r.is_published ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
                     }`}
                   >
                     {r.is_published ? 'Live' : 'Draft'}
                   </span>
+                  {favorites && <FavoriteCount count={favorites[r.id] ?? 0} short className="text-xs" />}
+                  </div>
                 </Link>
               </li>
             );

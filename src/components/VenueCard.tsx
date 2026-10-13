@@ -6,6 +6,7 @@ import { openState } from '@/lib/hours';
 import { useDirectory } from '@/lib/directory';
 import { useActivity } from '@/lib/activity';
 import { HeatBadge, HeatPill, OpenBadge, Price, RatingBadge, SafeImg } from './ui';
+import { FavoriteButton } from './FavoriteButton';
 
 function OpenPill({ r, now }: { r: Venue; now: number }) {
   const s = openState(r.hours, now);
@@ -32,10 +33,13 @@ export function VenueCard({ r, distance, now }: { r: Venue; distance?: string | 
   const featured = isFeatured(r, now);
   const rating = useDirectory().ratings[r.id];
   const heat = useActivity().heatOf(r.id);
+  // The heart sits beside the link, not in it (a button can't go inside <a>),
+  // so the hover lift lives on the wrapper and the link follows via group-hover.
   return (
+    <div className="group relative h-full hover:-translate-y-1 transition-transform duration-300">
     <Link
       to={`/v/${r.slug}`}
-      className={`group flex flex-col bg-night-900 rounded-[1.75rem] overflow-hidden border border-white/10 hover:border-brand-400/50 hover:-translate-y-1 hover:glow-brand-soft transition-all duration-300 ${featured ? 'neon-edge' : ''}`}
+      className={`h-full flex flex-col bg-night-900 rounded-[1.75rem] overflow-hidden border border-white/10 group-hover:border-brand-400/50 group-hover:glow-brand-soft transition-all duration-300 ${featured ? 'neon-edge' : ''}`}
     >
       <div className="relative aspect-[4/3] overflow-hidden bg-night-800">
         <Cover r={r} />
@@ -46,7 +50,7 @@ export function VenueCard({ r, distance, now }: { r: Venue; distance?: string | 
           </span>
         )}
         {distance && (
-          <span className="absolute top-3 right-3 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-night-950/80 backdrop-blur text-white text-xs font-extrabold ring-1 ring-white/10">
+          <span className="absolute top-3.5 right-14 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-night-950/80 backdrop-blur text-white text-xs font-extrabold ring-1 ring-white/10">
             <Navigation className="w-3 h-3" /> {distance}
           </span>
         )}
@@ -91,6 +95,10 @@ export function VenueCard({ r, distance, now }: { r: Venue; distance?: string | 
         )}
       </div>
     </Link>
+      <div className="absolute top-3 right-3">
+        <FavoriteButton venueId={r.id} name={r.name} variant="overlay" />
+      </div>
+    </div>
   );
 }
 
@@ -99,10 +107,8 @@ export function VenueRow({ r, distance, now }: { r: Venue; distance?: string | n
   const rating = useDirectory().ratings[r.id];
   const heat = useActivity().heatOf(r.id);
   return (
-    <Link
-      to={`/v/${r.slug}`}
-      className="group flex items-center gap-4 p-3 bg-night-900 rounded-2xl border border-white/10 hover:border-brand-400/50 transition-all"
-    >
+    <div className="flex items-center gap-2 pr-3 bg-night-900 rounded-2xl border border-white/10 hover:border-brand-400/50 transition-all">
+    <Link to={`/v/${r.slug}`} className="group flex-1 min-w-0 flex items-center gap-4 p-3 pr-0">
       <div className="relative w-24 h-24 sm:w-28 sm:h-24 rounded-xl overflow-hidden shrink-0 bg-night-800">
         <Cover r={r} />
         {isFeatured(r, now) && (
@@ -128,6 +134,8 @@ export function VenueRow({ r, distance, now }: { r: Venue; distance?: string | n
         </div>
       </div>
     </Link>
+      <FavoriteButton venueId={r.id} name={r.name} variant="overlay" />
+    </div>
   );
 }
 
