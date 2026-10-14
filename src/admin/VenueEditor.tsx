@@ -79,6 +79,8 @@ export default function VenueEditor() {
   const { toast, confirm } = useFeedback();
   const { role, base } = useConsole();
   const isAdmin = role === 'admin';
+  // Editors get everything about a spot except featured placement, delete, managers and events.
+  const isManager = role === 'manager';
   const favorites = useFavoriteCounts();
   const [venue, setVenue] = useState<Venue | null>(null);
   const [form, setForm] = useState<Form | null>(null);
@@ -122,7 +124,7 @@ export default function VenueEditor() {
     return (
       <div className="text-center py-16">
         <p className="font-extrabold text-slate-700">That spot doesn’t exist (or was deleted).</p>
-        <Link to={base} className="text-brand-600 font-bold">{isAdmin ? 'Back to spots' : 'Back to my venues'}</Link>
+        <Link to={base} className="text-brand-600 font-bold">{isManager ? 'Back to my venues' : 'Back to spots'}</Link>
       </div>
     );
   }
@@ -140,16 +142,18 @@ export default function VenueEditor() {
     const f = { ...form, ...overrides };
     if (!f.name.trim()) return toast('Name can’t be empty', 'error');
     setSaving(true);
-    // Managers don't send the admin-only fields (the database ignores them anyway).
-    const adminOnly = isAdmin
-      ? {
+    // Managers don't send the admin-only fields, nor editors featured (the database ignores them anyway).
+    const adminOnly = isManager
+      ? {}
+      : {
           slug: f.slug.trim() || null,
           radius_m: Math.round(Math.min(400, Math.max(15, f.radius_m))),
           is_published: f.is_published,
-          is_featured: f.is_featured,
-          featured_until: f.is_featured && f.featured_until ? new Date(`${f.featured_until}T23:59:59-05:00`).toISOString() : null,
-        }
-      : {};
+          ...(isAdmin && {
+            is_featured: f.is_featured,
+            featured_until: f.is_featured && f.featured_until ? new Date(`${f.featured_until}T23:59:59-05:00`).toISOString() : null,
+          }),
+        };
     const { data, error } = await supabase
       .from('venues')
       .update({
@@ -234,14 +238,14 @@ export default function VenueEditor() {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <Link to={base} className="inline-flex items-center gap-1 text-sm font-bold text-slate-500 hover:text-slate-800 mb-1">
-            <ArrowLeft className="w-4 h-4" /> {isAdmin ? 'Spots' : 'My venues'}
+            <ArrowLeft className="w-4 h-4" /> {isManager ? 'My venues' : 'Spots'}
           </Link>
           <h1 className="text-2xl font-black text-slate-900 truncate">{venue.name}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className={`inline-block px-2 py-0.5 rounded-md text-[11px] font-extrabold uppercase ${venue.is_published ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>
               {venue.is_published ? 'Live' : 'Draft'}
             </span>
-            {favorites && <FavoriteCount count={favorites[venue.id] ?? 0} className="text-sm" />}
+            {favorites && role !== 'editor' && <FavoriteCount count={favorites[venue.id] ?? 0} className="text-sm" />}
           </div>
         </div>
         <a href={`/v/${venue.slug}`} target="_blank" rel="noreferrer" className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 text-sm font-bold text-slate-700 hover:bg-slate-50">
@@ -343,7 +347,7 @@ export default function VenueEditor() {
           <Field label="Address / directions">
             <input className={inputClass} value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="e.g. West Bay St, next to the Fish Fry" />
           </Field>
-          {isAdmin && (
+          {!isManager && (
           <Field
             label={`Activity radius · ${form.radius_m} m`}
             hint="Phones within this distance of the pin count as “here” for live activity. ~40 m for a small bar, 80–150 m for a beach bar or big club."
@@ -371,6 +375,7 @@ export default function VenueEditor() {
         </div>
       </Panel>
 
+      {role !== 'editor' && (
       <Panel
         title="Events here"
         action={
@@ -384,6 +389,7 @@ export default function VenueEditor() {
           <Link to={`${base}/events`} className="font-extrabold text-brand-700 hover:underline">Events</Link>.
         </p>
       </Panel>
+      )}
 
       <Panel title="Contact" id="contact">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -404,7 +410,7 @@ export default function VenueEditor() {
 
       {isAdmin && <VenueManagersPanel venueId={venue.id} venueName={venue.name} />}
 
-      {!isAdmin && (
+      {isManager && (
         <Panel title="Visibility" id="visibility">
           <p className="text-sm font-semibold text-slate-600">
             {venue.is_published ? 'Your listing is live.' : 'Your listing is a draft; the Nassau Nights team will publish it.'} Publishing, featured
@@ -414,15 +420,16 @@ export default function VenueEditor() {
         </Panel>
       )}
 
-      {isAdmin && (
+      {!isManager && (
       <Panel title="Visibility" id="visibility">
         <div className="space-y-5">
           <Toggle
             checked={form.is_published}
             onChange={publishToggle}
             label="Published"
-            hint={form.is_published ? 'Visible in the directory and on the map.' : 'Draft — only admins can see it.'}
+            hint={form.is_published ? 'Visible in the directory and on the map.' : 'Draft — only the team can see it.'}
           />
+          {isAdmin && (
           <div className="border-t border-slate-100 pt-5 space-y-3">
             <Toggle
               checked={form.is_featured}
@@ -436,16 +443,19 @@ export default function VenueEditor() {
               </Field>
             )}
           </div>
+          )}
           <div className="border-t border-slate-100 pt-5">
             <Field label="URL slug" hint={`nassaunights…/v/${form.slug || '…'} — changing it breaks old links.`}>
               <input className={`${inputClass} max-w-sm`} value={form.slug} onChange={(e) => set('slug', e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))} />
             </Field>
           </div>
+          {isAdmin && (
           <div className="border-t border-slate-100 pt-5">
             <Button variant="secondary" onClick={remove} className="text-rose-600">
               <Trash2 className="w-4 h-4" /> Delete this spot
             </Button>
           </div>
+          )}
         </div>
       </Panel>
       )}

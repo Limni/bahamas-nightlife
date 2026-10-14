@@ -1183,18 +1183,18 @@ end $$;
 -- =============================================================================
 
 -- Dropped first: create or replace can't change a function's result columns
--- (invited_at, then venue_count, were added after the first version).
+-- (invited_at, venue_count and is_editor were added after the first version).
 drop function if exists public.admin_list_users(text, text, int, int);
 create function public.admin_list_users(
   p_search text default null,
-  p_filter text default 'all',      -- all | admins | managers | suspended | unconfirmed | invited
+  p_filter text default 'all',      -- all | admins | editors | managers | suspended | unconfirmed | invited
   p_limit  int  default 50,
   p_offset int  default 0
 )
 returns table (
   id uuid, email text, display_name text, created_at timestamptz,
   last_sign_in_at timestamptz, email_confirmed_at timestamptz, banned_until timestamptz,
-  invited_at timestamptz, is_admin boolean, venue_count int, review_count int, hidden_review_count int, submission_count int,
+  invited_at timestamptz, is_admin boolean, is_editor boolean, venue_count int, review_count int, hidden_review_count int, submission_count int,
   total_count bigint
 )
 language plpgsql
@@ -1219,6 +1219,7 @@ begin
          case when u.banned_until > now() then u.banned_until end,
          u.invited_at,
          a.user_id is not null,
+         exists (select 1 from public.editors ed where ed.user_id = u.id),
          (select count(*)::int from public.venue_managers vm where vm.user_id = u.id),
          (select count(*)::int from public.reviews r where r.user_id = u.id),
          (select count(*)::int from public.reviews r where r.user_id = u.id and r.is_hidden),
@@ -1234,6 +1235,7 @@ begin
     and case coalesce(p_filter, 'all')
           when 'admins' then a.user_id is not null
           when 'managers' then exists (select 1 from public.venue_managers vm where vm.user_id = u.id)
+          when 'editors' then exists (select 1 from public.editors ed where ed.user_id = u.id)
           when 'invited' then u.invited_at is not null and u.email_confirmed_at is null
           when 'suspended' then coalesce(u.banned_until > now(), false)
           when 'unconfirmed' then u.email_confirmed_at is null
@@ -1442,18 +1444,29 @@ drop policy if exists "Managers edit their venues" on public.venues;
 create policy "Managers edit their venues" on public.venues
   for update using (public.is_venue_manager(id)) with check (public.is_venue_manager(id));
 
+-- Also guards editors (see "Editors" below): they may publish and change the
+-- slug and activity radius, but featured placement stays with admins. Only
+-- editors can insert as a non-admin (managers have no insert policy).
 create or replace function public.venues_manager_guard()
 returns trigger
 language plpgsql
 as $$
 begin
   if public.is_restricted_writer() then
-    new.is_published    := old.is_published;
+    if tg_op = 'INSERT' then
+      new.is_featured     := false;
+      new.featured_until  := null;
+      new.google_place_id := null;
+      return new;
+    end if;
     new.is_featured     := old.is_featured;
     new.featured_until  := old.featured_until;
-    new.slug            := old.slug;
-    new.radius_m        := old.radius_m;
     new.google_place_id := old.google_place_id;
+    if not public.is_editor() then
+      new.is_published := old.is_published;
+      new.slug         := old.slug;
+      new.radius_m     := old.radius_m;
+    end if;
   end if;
   return new;
 end;
@@ -1462,7 +1475,7 @@ $$;
 -- Named to sort before venues_slug, so the slug is restored before that runs.
 drop trigger if exists venues_manager_guard on public.venues;
 create trigger venues_manager_guard
-  before update on public.venues
+  before insert or update on public.venues
   for each row execute function public.venues_manager_guard();
 
 -- Photos and menus ---------------------------------------------------------------
@@ -1758,3 +1771,106 @@ $$;
 
 revoke execute on function public.venue_favorite_counts() from public, anon;
 grant execute on function public.venue_favorite_counts() to authenticated;
+
+-- =============================================================================
+-- Editors: members who help keep the listings up to date. In the admin console
+-- they get Spots and Quick add only: they can see every spot (drafts too), add
+-- spots, and edit details, photos, menus, hours, location, tags (existing
+-- ones) and whether a spot is published. They can't delete spots, set
+-- featured placement, assign managers, or use any other admin function
+-- (events, inbox, reviews, members, tags, theme, activity).
+--
+-- Like managers, this is extra policies OR-ed with the admin ones, plus the
+-- venues guard trigger above for featured. Suspended members lose it.
+-- =============================================================================
+create table if not exists public.editors (
+  user_id    uuid primary key references auth.users (id) on delete cascade,
+  created_by uuid default auth.uid() references auth.users (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.editors enable row level security;
+
+drop policy if exists "Editors see their own role" on public.editors;
+create policy "Editors see their own role" on public.editors
+  for select using (user_id = auth.uid() or public.is_admin());
+
+drop policy if exists "Admins appoint editors" on public.editors;
+create policy "Admins appoint editors" on public.editors
+  for all using (public.is_admin()) with check (public.is_admin());
+
+create or replace function public.is_editor()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select auth.uid() is not null
+     and exists (select 1 from public.editors e where e.user_id = auth.uid())
+     and not public.is_suspended();
+$$;
+
+grant execute on function public.is_editor() to anon, authenticated;
+
+-- Venues: see all, add, edit (no delete policy, so they can't remove one).
+drop policy if exists "Editors see all venues" on public.venues;
+create policy "Editors see all venues" on public.venues
+  for select using (public.is_editor());
+
+drop policy if exists "Editors add venues" on public.venues;
+create policy "Editors add venues" on public.venues
+  for insert with check (public.is_editor());
+
+drop policy if exists "Editors edit venues" on public.venues;
+create policy "Editors edit venues" on public.venues
+  for update using (public.is_editor()) with check (public.is_editor());
+
+-- Photos, videos and menus of any spot.
+drop policy if exists "Editors manage photos" on public.venue_photos;
+create policy "Editors manage photos" on public.venue_photos
+  for all using (public.is_editor()) with check (public.is_editor());
+
+drop policy if exists "Editors manage menu items" on public.menu_items;
+create policy "Editors manage menu items" on public.menu_items
+  for all using (public.is_editor()) with check (public.is_editor());
+
+-- Spot media in storage (<venue_id>/…), not event flyers (events/…).
+drop policy if exists "Editors upload venue media" on storage.objects;
+create policy "Editors upload venue media" on storage.objects
+  for insert with check (bucket_id = 'venue-media' and (storage.foldername(name))[1] <> 'events' and public.is_editor());
+
+drop policy if exists "Editors update venue media" on storage.objects;
+create policy "Editors update venue media" on storage.objects
+  for update using (bucket_id = 'venue-media' and (storage.foldername(name))[1] <> 'events' and public.is_editor());
+
+drop policy if exists "Editors delete venue media" on storage.objects;
+create policy "Editors delete venue media" on storage.objects
+  for delete using (bucket_id = 'venue-media' and (storage.foldername(name))[1] <> 'events' and public.is_editor());
+
+create or replace function public.admin_set_editor(p_user uuid, p_editor boolean)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Only admins can change editor access' using errcode = '42501';
+  end if;
+  if p_editor then
+    if not exists (select 1 from auth.users where id = p_user) then
+      raise exception 'That account no longer exists';
+    end if;
+    if exists (select 1 from auth.users where id = p_user and banned_until > now()) then
+      raise exception 'Lift the suspension before making them an editor';
+    end if;
+    insert into public.editors (user_id) values (p_user) on conflict do nothing;
+  else
+    delete from public.editors where user_id = p_user;
+  end if;
+end;
+$$;
+
+revoke execute on function public.admin_set_editor(uuid, boolean) from public, anon;
+grant execute on function public.admin_set_editor(uuid, boolean) to authenticated;

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Route, Routes, Link } from 'react-router-dom';
+import { Navigate, NavLink, Route, Routes, Link } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
 import { Activity, CalendarHeart, ExternalLink, Inbox as InboxIcon, ListChecks, LogOut, Palette, Plus, Star, Tags, Martini, Users } from 'lucide-react';
 import { supabase, supabaseConfigured } from '@/lib/supabase';
@@ -17,6 +17,7 @@ import EventsList from './EventsList';
 import EventEditor from './EventEditor';
 import ActivityAdmin from './ActivityAdmin';
 import UsersAdmin from './UsersAdmin';
+import { ADMIN_SCOPE, ConsoleProvider, EDITOR_SCOPE } from './console';
 
 // The public site is dark; the console is a light, functional tool.
 const LIGHT = { colorScheme: 'light' } as const;
@@ -63,9 +64,10 @@ function NotAdmin({ email }: { email?: string }) {
   return (
     <div style={LIGHT} className="min-h-dvh flex items-center justify-center p-4 bg-slate-100">
       <div className="max-w-md bg-white rounded-3xl shadow-xl p-7">
-        <h1 className="text-xl font-extrabold text-slate-900">This account isn’t an admin yet</h1>
+        <h1 className="text-xl font-extrabold text-slate-900">This account doesn’t have console access</h1>
         <p className="mt-2 text-sm text-slate-600 font-semibold">
-          Signed in as <b>{email}</b>. To grant access, run this in the Supabase SQL editor:
+          Signed in as <b>{email}</b>. An admin can make you an editor (spots only) or an admin under Members. To make the first admin, run
+          this in the Supabase SQL editor:
         </p>
         <pre className="mt-3 p-3 rounded-xl bg-slate-900 text-emerald-300 text-xs overflow-x-auto">
           {`insert into public.admins (user_id)\nselect id from auth.users\nwhere email = '${email ?? 'you@example.com'}';`}
@@ -79,10 +81,11 @@ function NotAdmin({ email }: { email?: string }) {
 }
 
 // `phone`: in the 5-slot bottom bar; the rest sit as icons in the phone header.
+// `editor`: also shown to editors, who get only the spots.
 const NAV = [
-  { to: '/admin', label: 'Spots', icon: ListChecks, end: true, phone: true },
+  { to: '/admin', label: 'Spots', icon: ListChecks, end: true, phone: true, editor: true },
   { to: '/admin/events', label: 'Events', icon: CalendarHeart, end: false, phone: true },
-  { to: '/admin/new', label: 'Quick add', icon: Plus, end: false, phone: true },
+  { to: '/admin/new', label: 'Quick add', icon: Plus, end: false, phone: true, editor: true },
   { to: '/admin/inbox', label: 'Inbox', icon: InboxIcon, end: false, phone: true },
   { to: '/admin/activity', label: 'Activity', icon: Activity, end: false, phone: true },
   { to: '/admin/reviews', label: 'Reviews', icon: Star, end: false, phone: false },
@@ -92,10 +95,13 @@ const NAV = [
 ];
 
 
-function Shell({ session }: { session: Session }) {
+function Shell({ session, role }: { session: Session; role: 'admin' | 'editor' }) {
   const [inboxCount, setInboxCount] = useState(0);
+  const editor = role === 'editor';
+  const nav = editor ? NAV.filter((n) => n.editor) : NAV;
 
   useEffect(() => {
+    if (editor) return;
     const load = () =>
       supabase
         .from('submissions')
@@ -109,7 +115,7 @@ function Shell({ session }: { session: Session }) {
       clearInterval(id);
       window.removeEventListener('inbox-changed', load);
     };
-  }, []);
+  }, [editor]);
 
   return (
     <div style={LIGHT} className="min-h-dvh bg-slate-100 text-slate-900 pb-[calc(68px+env(safe-area-inset-bottom))] md:pb-0">
@@ -119,10 +125,10 @@ function Shell({ session }: { session: Session }) {
             <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-glow-500 flex items-center justify-center shrink-0">
               <Martini className="w-4 h-4 text-white" />
             </span>
-            <span className="font-display font-black truncate md:hidden xl:inline">Nassau Nights <span className="text-brand-400 font-bold">Admin</span></span>
+            <span className="font-display font-black truncate md:hidden xl:inline">Nassau Nights <span className="text-brand-400 font-bold">{editor ? 'Editor' : 'Admin'}</span></span>
           </Link>
           <nav className="hidden md:flex items-center gap-1">
-            {NAV.map(({ to, label, icon: Icon, end }) => (
+            {nav.map(({ to, label, icon: Icon, end }) => (
               <NavLink
                 key={to}
                 to={to}
@@ -139,7 +145,7 @@ function Shell({ session }: { session: Session }) {
             ))}
           </nav>
           <div className="flex items-center gap-1 shrink-0">
-            {NAV.filter((n) => !n.phone).map(({ to, label, icon: Icon }) => (
+            {nav.filter((n) => !n.phone).map(({ to, label, icon: Icon }) => (
               <NavLink
                 key={to}
                 to={to}
@@ -160,6 +166,14 @@ function Shell({ session }: { session: Session }) {
       </header>
 
       <main className="max-w-5xl mx-auto px-3 md:px-4 py-4 md:py-6">
+        {editor ? (
+          <Routes>
+            <Route index element={<VenuesList />} />
+            <Route path="new" element={<QuickAdd />} />
+            <Route path="v/:id" element={<VenueEditor />} />
+            <Route path="*" element={<Navigate to="/admin" replace />} />
+          </Routes>
+        ) : (
         <Routes>
           <Route index element={<VenuesList />} />
           <Route path="new" element={<QuickAdd />} />
@@ -173,12 +187,13 @@ function Shell({ session }: { session: Session }) {
           <Route path="activity" element={<ActivityAdmin />} />
           <Route path="users" element={<UsersAdmin meId={session.user.id} />} />
         </Routes>
+        )}
       </main>
 
       {/* Phone tab bar — the console is built to be used in the field. */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-[1500] bg-white border-t border-slate-200 pb-[env(safe-area-inset-bottom)]">
-        <div className="h-[68px] grid grid-cols-5">
-          {NAV.filter((n) => n.phone).map(({ to, label, icon: Icon, end }) => (
+        <div className={`h-[68px] grid ${editor ? 'grid-cols-2' : 'grid-cols-5'}`}>
+          {nav.filter((n) => n.phone).map(({ to, label, icon: Icon, end }) => (
             <NavLink
               key={to}
               to={to}
@@ -208,7 +223,8 @@ function Shell({ session }: { session: Session }) {
 
 export default function AdminApp() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+  // null while checking; 'none' = signed in without console access.
+  const [role, setRole] = useState<'admin' | 'editor' | 'none' | null>(null);
 
   useEffect(() => {
     document.title = 'Admin — Nassau Nights';
@@ -218,13 +234,15 @@ export default function AdminApp() {
   }, []);
 
   useEffect(() => {
-    setIsAdmin(null);
+    setRole(null);
     if (!session) return;
-    supabase.rpc('is_admin').then(({ data }) => setIsAdmin(data === true));
+    Promise.all([supabase.rpc('is_admin'), supabase.rpc('is_editor')]).then(([a, e]) =>
+      setRole(a.data === true ? 'admin' : e.data === true ? 'editor' : 'none'),
+    );
   }, [session?.user.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!supabaseConfigured) return <SetupNotice />;
-  if (session === undefined || (session && isAdmin === null)) {
+  if (session === undefined || (session && role === null)) {
     return (
       <div style={LIGHT} className="min-h-dvh flex items-center justify-center bg-slate-100">
         <Spinner className="w-8 h-8" />
@@ -232,11 +250,13 @@ export default function AdminApp() {
     );
   }
   if (!session) return <Login />;
-  if (!isAdmin) return <NotAdmin email={session.user.email} />;
+  if (role !== 'admin' && role !== 'editor') return <NotAdmin email={session.user.email} />;
 
   return (
     <FeedbackProvider>
-      <Shell session={session} />
+      <ConsoleProvider value={role === 'editor' ? EDITOR_SCOPE : ADMIN_SCOPE}>
+        <Shell session={session} role={role} />
+      </ConsoleProvider>
     </FeedbackProvider>
   );
 }

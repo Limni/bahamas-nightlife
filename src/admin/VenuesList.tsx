@@ -7,6 +7,7 @@ import { isFeatured, type Venue } from '@/lib/types';
 import { Spinner } from '@/components/ui';
 import { inputClass } from './ui';
 import { FavoriteCount, useFavoriteCounts } from './favorites';
+import { useConsole } from './console';
 
 type Row = Venue & {
   venue_photos: { count: number }[];
@@ -44,6 +45,8 @@ export default function VenuesList() {
   const [menuPhotoCounts, setMenuPhotoCounts] = useState<Record<string, number>>({});
   const [query, setQuery] = useState('');
   const [view, setView] = useState<View>('all');
+  // Favourite counts are for admins (editors get none from the database).
+  const { role } = useConsole();
   const favorites = useFavoriteCounts();
 
   useEffect(() => {
@@ -178,7 +181,7 @@ export default function VenuesList() {
                   >
                     {r.is_published ? 'Live' : 'Draft'}
                   </span>
-                  {favorites && <FavoriteCount count={favorites[r.id] ?? 0} short className="text-xs" />}
+                  {favorites && role === 'admin' && <FavoriteCount count={favorites[r.id] ?? 0} short className="text-xs" />}
                   </div>
                 </Link>
               </li>

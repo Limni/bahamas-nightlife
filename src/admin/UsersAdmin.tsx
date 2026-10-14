@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Ban, Check, ChevronDown, Copy, KeyRound, Mail, MailCheck, MessageCircle, Search, Send, Share2, ShieldCheck, ShieldOff, Trash2, Undo2, UserPlus, Users as UsersIcon, X } from 'lucide-react';
+import { Ban, Check, PencilLine, PencilOff, ChevronDown, Copy, KeyRound, Mail, MailCheck, MessageCircle, Search, Send, Share2, ShieldCheck, ShieldOff, Trash2, Undo2, UserPlus, Users as UsersIcon, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useDirectory } from '@/lib/directory';
 import { SUBMISSION_KIND_LABELS, type SubmissionKind, type SubmissionStatus } from '@/lib/types';
@@ -21,13 +21,15 @@ interface Member {
   /** Venues they can manage from /manage. */
   venue_count: number;
   is_admin: boolean;
+  /** Can edit spots in the console (missing before the editors migration). */
+  is_editor?: boolean;
   review_count: number;
   hidden_review_count: number;
   submission_count: number;
   total_count: number;
 }
 
-type Filter = 'all' | 'admins' | 'managers' | 'invited' | 'suspended' | 'unconfirmed';
+type Filter = 'all' | 'admins' | 'editors' | 'managers' | 'invited' | 'suspended' | 'unconfirmed';
 const PAGE = 50;
 
 const SUSPEND_FOR: [string, number | null][] = [
@@ -103,12 +105,13 @@ async function sendInvite(body: { email: string; display_name?: string; make_adm
 
 const pendingInvite = (m: Member) => !!m.invited_at && !m.email_confirmed_at;
 
-function Badge({ tone, children }: { tone: 'brand' | 'rose' | 'amber' | 'slate'; children: React.ReactNode }) {
+function Badge({ tone, children }: { tone: 'brand' | 'rose' | 'amber' | 'slate' | 'sky'; children: React.ReactNode }) {
   const tones = {
     brand: 'bg-brand-100 text-brand-800',
     rose: 'bg-rose-100 text-rose-700',
     amber: 'bg-amber-100 text-amber-800',
     slate: 'bg-slate-200 text-slate-600',
+    sky: 'bg-sky-100 text-sky-800',
   };
   return <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase whitespace-nowrap ${tones[tone]}`}>{children}</span>;
 }
@@ -199,6 +202,7 @@ export default function UsersAdmin({ meId }: { meId: string }) {
             [
               ['all', 'All'],
               ['admins', 'Admins'],
+              ['editors', 'Editors'],
               ['managers', 'Managers'],
               ['suspended', 'Suspended'],
               ['invited', 'Invited'],
@@ -272,6 +276,7 @@ function MemberRow({ m, me, open, onToggle, onChanged }: { m: Member; me: boolea
             <span className="font-extrabold text-slate-900 truncate">{m.display_name}</span>
             {me && <Badge tone="slate">You</Badge>}
             {m.is_admin && <Badge tone="brand">Admin</Badge>}
+            {m.is_editor && !m.is_admin && <Badge tone="sky">Editor</Badge>}
             {m.venue_count > 0 && <Badge tone="slate">Manager · {m.venue_count}</Badge>}
             {m.banned_until && <Badge tone="rose">{suspendedLabel(m.banned_until)}</Badge>}
             {!m.email_confirmed_at && <Badge tone="amber">{m.invited_at ? 'Invited' : 'Unconfirmed'}</Badge>}
@@ -376,6 +381,25 @@ function MemberDetail({ m, me, onChanged }: { m: Member; me: boolean; onChanged:
     );
     if (!ok) return;
     run('admin', () => supabase.rpc('admin_set_admin', { p_user: m.id, p_admin: admin }), admin ? 'Now an admin' : 'Admin access removed');
+  };
+
+  const setEditor = async (editor: boolean) => {
+    const ok = await confirm(
+      editor
+        ? {
+            title: `Make ${m.display_name} an editor?`,
+            body: 'They’ll be able to add and edit every spot in the admin console (details, photos, menus, hours, location, publishing), but not delete spots, feature them or use any other admin page.',
+            confirmLabel: 'Make editor',
+          }
+        : {
+            title: `Remove ${m.display_name}’s editor access?`,
+            body: 'They keep their member account. Their past edits stay.',
+            confirmLabel: 'Remove access',
+            danger: true,
+          },
+    );
+    if (!ok) return;
+    run('editor', () => supabase.rpc('admin_set_editor', { p_user: m.id, p_editor: editor }), editor ? 'Now an editor' : 'Editor access removed');
   };
 
   const suspend = async () => {
@@ -506,6 +530,17 @@ function MemberDetail({ m, me, onChanged }: { m: Member; me: boolean; onChanged:
                 <ShieldCheck className="w-4 h-4" /> Make admin
               </Button>
             )}
+            {/* Admins can already do everything an editor can. */}
+            {!m.is_admin &&
+              (m.is_editor ? (
+                <Button variant="secondary" loading={busy === 'editor'} onClick={() => setEditor(false)}>
+                  <PencilOff className="w-4 h-4" /> Remove editor
+                </Button>
+              ) : (
+                <Button variant="secondary" loading={busy === 'editor'} disabled={!!m.banned_until} onClick={() => setEditor(true)}>
+                  <PencilLine className="w-4 h-4" /> Make editor
+                </Button>
+              ))}
             {pendingInvite(m) && m.email && (
               <Button variant="secondary" loading={busy === 'invite'} onClick={resendInvite}>
                 <Send className="w-4 h-4" /> Resend invite

@@ -250,7 +250,7 @@ const STATUS: Record<SubmissionStatus, { label: string; className: string; icon:
 };
 
 function SignedIn() {
-  const { session, profile, isAdmin, updateName, signOut } = useAuth();
+  const { session, profile, isAdmin, isEditor, updateName, signOut } = useAuth();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
@@ -332,9 +332,9 @@ function SignedIn() {
           <p className="text-sm font-semibold text-white/65 truncate">{session?.user.email} · only your name is public</p>
         </div>
         <div className="flex sm:flex-col gap-2">
-          {isAdmin && (
+          {(isAdmin || isEditor) && (
             <Link to="/admin" className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-sm font-extrabold">
-              <Shield className="w-4 h-4" /> Admin console
+              <Shield className="w-4 h-4" /> {isAdmin ? 'Admin console' : 'Edit spots'}
             </Link>
           )}
           <button onClick={signOut} className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-sm font-extrabold">

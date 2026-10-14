@@ -10,6 +10,8 @@ interface AuthValue {
   session: Session | null;
   profile: Profile | null;
   isAdmin: boolean;
+  /** Can edit spots in the admin console (see "Editors" in schema.sql). False until the schema has the role. */
+  isEditor: boolean;
   /** True until the stored session has been checked on load. */
   loading: boolean;
   /** Set when the visitor arrived from a password-reset email. */
@@ -38,6 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isEditor, setIsEditor] = useState(false);
   const [loading, setLoading] = useState(supabaseConfigured);
   const [recovering, setRecovering] = useState(false);
   const [invited, setInvited] = useState(authLinkType === 'invite');
@@ -59,9 +62,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setProfile(null);
     setIsAdmin(false);
+    setIsEditor(false);
     if (!userId) return;
     supabase.from('profiles').select('*').eq('id', userId).maybeSingle().then(({ data }) => setProfile(data as Profile | null));
     supabase.rpc('is_admin').then(({ data }) => setIsAdmin(data === true));
+    supabase.rpc('is_editor').then(({ data }) => setIsEditor(data === true));
   }, [userId]);
 
   const signIn = useCallback(async (email: string, password: string) => {
@@ -118,8 +123,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ session, profile, isAdmin, loading, recovering, invited, signIn, signUp, sendReset, updatePassword, updateName, signOut }),
-    [session, profile, isAdmin, loading, recovering, invited, signIn, signUp, sendReset, updatePassword, updateName, signOut],
+    () => ({ session, profile, isAdmin, isEditor, loading, recovering, invited, signIn, signUp, sendReset, updatePassword, updateName, signOut }),
+    [session, profile, isAdmin, isEditor, loading, recovering, invited, signIn, signUp, sendReset, updatePassword, updateName, signOut],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
