@@ -41,7 +41,37 @@ interface Config {
 const CACHE_KEY = 'radio:v1';
 const LAST_KEY = 'radio:last';
 const VOLUME_KEY = 'radio:volume';
+const PREVIEW_KEY = 'radio:preview';
 const OFF: Config = { enabled: false, partner: null, partnerUrl: null, stations: [] };
+
+function readPreview() {
+  try {
+    return sessionStorage.getItem(PREVIEW_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * "/?radio=preview" (the admin's "Preview on the site") shows the player in
+ * this tab even while it's switched off, with every enabled station the
+ * viewer can read: all of them for an admin (RLS), so stations without a
+ * stream URL yet appear too. Visitors trying it only see ready stations.
+ * "?radio=off" ends it. Call once before rendering, like initTheme().
+ */
+export function initRadioPreview() {
+  const url = new URL(window.location.href);
+  const param = url.searchParams.get('radio');
+  if (param === null) return;
+  try {
+    if (param === 'preview') sessionStorage.setItem(PREVIEW_KEY, '1');
+    else sessionStorage.removeItem(PREVIEW_KEY);
+  } catch {
+    /* private mode */
+  }
+  url.searchParams.delete('radio');
+  history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+}
 
 /** Visitor-facing initials when a station has no logo yet: "100 Jamz" → "100", "Kiss FM" → "KISS". */
 export function stationInitials(name: string) {
@@ -217,8 +247,11 @@ export async function fetchNowPlaying(url: string, timeoutMs = 8000): Promise<st
 // ---------------------------------------------------------------------------
 
 interface RadioState {
-  /** The admin has the player on and at least one station has a stream. */
+  /** The admin has the player on and at least one station has a stream (or this tab is previewing). */
   available: boolean;
+  /** This tab is previewing the player ("/?radio=preview"). */
+  preview: boolean;
+  endPreview: () => void;
   partner: string | null;
   partnerUrl: string | null;
   stations: RadioStation[];
@@ -252,7 +285,8 @@ interface Playback {
 const LISTEN_PING_MS = 5 * 60_000;
 
 export function RadioProvider({ children }: { children: ReactNode }) {
-  const [config, setConfig] = useState<Config>(() => readJson(CACHE_KEY, OFF));
+  const [preview, setPreview] = useState(readPreview);
+  const [config, setConfig] = useState<Config>(() => (readPreview() ? OFF : readJson(CACHE_KEY, OFF)));
   const [current, setCurrent] = useState<RadioStation | null>(null);
   const [status, setStatus] = useState<RadioStatus>('idle');
   const [lastId, setLastId] = useState<string | null>(() => readJson<string | null>(LAST_KEY, null));
@@ -276,15 +310,16 @@ export function RadioProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase.from('site_settings').select('radio_enabled, radio_partner, radio_partner_url').maybeSingle();
       if (!alive) return;
       let next = OFF;
-      if (!error && data?.radio_enabled) {
+      if (!error && data && (data.radio_enabled || preview)) {
         const st = await supabase.from('radio_stations').select('*').order('sort').order('name');
         if (!alive) return;
         // RLS already hides incomplete stations from visitors; admins see them all.
-        const stations = ((st.data ?? []) as RadioStation[]).filter((s) => s.is_enabled && s.stream_url);
+        const stations = ((st.data ?? []) as RadioStation[]).filter((s) => s.is_enabled && (preview || s.stream_url));
         next = { enabled: true, partner: data.radio_partner ?? null, partnerUrl: data.radio_partner_url ?? null, stations };
       }
       setConfig(next);
-      writeStorage(CACHE_KEY, JSON.stringify(next));
+      // A preview never becomes what this browser shows normally.
+      if (!preview) writeStorage(CACHE_KEY, JSON.stringify(next));
     };
     load();
     // Switching the player off (or editing stations' partner line) reaches open tabs.
@@ -296,6 +331,15 @@ export function RadioProvider({ children }: { children: ReactNode }) {
       alive = false;
       supabase.removeChannel(channel);
     };
+  }, [preview]);
+
+  const endPreview = useCallback(() => {
+    try {
+      sessionStorage.removeItem(PREVIEW_KEY);
+    } catch {
+      /* private mode */
+    }
+    setPreview(false);
   }, []);
 
   const available = config.enabled && config.stations.length > 0;
@@ -315,7 +359,12 @@ export function RadioProvider({ children }: { children: ReactNode }) {
     (st: RadioStation, useBackup = false) => {
       teardown();
       const url = useBackup ? st.backup_url : st.stream_url;
-      if (!url) return;
+      if (!url) {
+        // Only reachable in a preview: show the station in the player, marked as having no stream.
+        setCurrent(st);
+        setStatus('error');
+        return;
+      }
       const token = tokenRef.current;
       const live = () => tokenRef.current === token;
       // A fresh element per play: a stale stream (or a slow hls.js import)
@@ -359,7 +408,7 @@ export function RadioProvider({ children }: { children: ReactNode }) {
       if (typeof attached === 'function') go(attached);
       else attached.then(go, fail);
 
-      track('radio_play', { station: st.slug, station_name: st.name });
+      if (!readPreview()) track('radio_play', { station: st.slug, station_name: st.name });
     },
     [teardown],
   );
@@ -449,10 +498,10 @@ export function RadioProvider({ children }: { children: ReactNode }) {
 
   // ---- listening-time heartbeat (GA4) ---------------------------------------
   useEffect(() => {
-    if (status !== 'playing' || !current) return;
+    if (status !== 'playing' || !current || preview) return;
     const id = setInterval(() => track('radio_listen', { station: current.slug, minutes: 5 }), LISTEN_PING_MS);
     return () => clearInterval(id);
-  }, [status, current]);
+  }, [status, current, preview]);
 
   // ---- lock screen / headset controls ---------------------------------------
   const latest = useRef({ resume, stop, skip });
@@ -499,6 +548,8 @@ export function RadioProvider({ children }: { children: ReactNode }) {
   const value = useMemo<RadioState>(
     () => ({
       available,
+      preview,
+      endPreview,
       partner: config.partner,
       partnerUrl: config.partnerUrl,
       stations: config.stations,
@@ -517,7 +568,7 @@ export function RadioProvider({ children }: { children: ReactNode }) {
       volume,
       setVolume,
     }),
-    [available, config, current, status, lastId, nowPlaying, pickerOpen, toggle, start, stop, resume, skip, close, volume, setVolume],
+    [available, preview, endPreview, config, current, status, lastId, nowPlaying, pickerOpen, toggle, start, stop, resume, skip, close, volume, setVolume],
   );
 
   return <RadioContext.Provider value={value}>{children}</RadioContext.Provider>;

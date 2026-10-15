@@ -161,7 +161,7 @@ README.md, DEPLOY.md       human docs
 
 | Route | Page | Notes |
 | --- | --- | --- |
-| `/` | Explore | eager-loaded; everything else is `lazy()`. Any public URL takes `?theme=<id>` to preview a theme in that tab (`?theme=off` ends it) |
+| `/` | Explore | eager-loaded; everything else is `lazy()`. Any public URL takes `?theme=<id>` to preview a theme in that tab (`?theme=off` ends it), and `?radio=preview` to preview the radio player (`?radio=off` ends it) |
 | `/map` | MapPage | `?focus=<venue id>` opens that venue's drawer, `?event=<event id>` an event's |
 | `/v/:slug` | VenuePage | `?tab=menu\|food\|photos\|reviews` (the "menu" tab is labelled Drinks; Food shows only when there's a food menu) |
 | `/events` | EventsPage | `?range=tonight\|week\|featured` selects the range chip |
@@ -343,6 +343,7 @@ Phase 1 of [docs/bar-crawl.md](docs/bar-crawl.md) (read it before extending this
 - **Now playing** (`parseNowPlaying`): Icecast `status-json.xsl`, Shoutcast v2 JSON / v1 XML, AzuraCast, Radio.co, play-history XML (`<song><title><artist>`, e.g. 100 Jamz's securenetsystems feed), generic `title`/`artist`, or plain text; ALL CAPS is title-cased. Polled every 30 s for all stations while the picker is open, every 20 s for the current station while it plays, never while stopped or the tab is hidden. A host that blocks cross-origin requests simply shows the genre line (fix: ask the host to allow it, or proxy it through nginx).
 - **Lock screen / headset:** Media Session metadata (track, station · frequency, logo) and play/pause/stop; next/previous track switches station.
 - **Analytics (GA4):** `radio_play` `{station, station_name}` and `radio_listen` `{station, minutes: 5}` every 5 minutes of playing. Register `station` as a custom dimension in GA4 to report per station.
+- **Preview:** `?radio=preview` (Admin → Radio → **Preview on the site**, `initRadioPreview()` in `main.tsx`, `sessionStorage` `radio:preview`) shows the player in that tab even while it's off, with every enabled station the viewer can read: all of them for admins (RLS), so stations without a stream appear, marked "Preview · no stream yet". A "Previewing the radio player ×" pill ends it. Previews never write the `radio:v1` cache or send GA events. Visitors trying the URL only see ready stations.
 - **Admin** (`/admin/radio`, admins only): master switch (saves at once) + partner name/link; station list with status (Ready / Needs stream URL / Off), reorder, and a form per station with **Test** (plays the stream in the console), **Check** (reads now playing), logo upload (512 px, `radio/<id>/`), brand colour, Enabled, delete.
 - The station's brand colour appears only on its logo frame and its tile's selected edge; everything else follows the site theme.
 

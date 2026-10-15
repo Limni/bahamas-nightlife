@@ -56,6 +56,12 @@ export function RadioButton({ className = '' }: { className?: string }) {
 function StationState({ station }: { station: RadioStation }) {
   const { current, status, lastId } = useRadio();
   const mine = current?.id === station.id;
+  if (!station.stream_url)
+    return (
+      <span className="inline-flex items-center gap-1.5 text-amber-300">
+        <AlertTriangle className="w-3.5 h-3.5" /> Preview · no stream yet
+      </span>
+    );
   if (mine && status === 'playing')
     return (
       <span className="inline-flex items-center gap-1.5 text-glow-300">
@@ -185,6 +191,28 @@ export function RadioSheet() {
   );
 }
 
+/** Shown while this tab previews the player (admins checking the look before streams exist). */
+export function RadioPreviewPill() {
+  const { preview, endPreview, close } = useRadio();
+  if (!preview) return null;
+  return (
+    <div className="fixed z-[1600] top-3 md:top-[76px] left-1/2 -translate-x-1/2 flex items-center gap-2 pl-3.5 pr-1.5 py-1.5 rounded-full bg-night-800 text-white ring-1 ring-white/10 text-xs font-extrabold shadow-xl whitespace-nowrap">
+      <RadioIcon className="w-4 h-4 text-glow-300" />
+      Previewing the radio player
+      <button
+        onClick={() => {
+          close();
+          endPreview();
+        }}
+        className="p-1 rounded-full hover:bg-white/15"
+        aria-label="End radio preview"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
 /** Height the docked player takes (plus gap), read by other floating bits so nothing overlaps. */
 const DOCK_SPACE = '72px';
 
@@ -265,7 +293,9 @@ export function RadioDock() {
           </span>
           <span className={`block text-xs font-semibold truncate ${status === 'error' ? 'text-amber-300' : 'text-night-300'}`}>
             {status === 'error'
-              ? 'Off air right now · tap play to retry'
+              ? current.stream_url
+                ? 'Off air right now · tap play to retry'
+                : 'Preview · no stream URL yet'
               : busy
                 ? 'Tuning in…'
                 : (track ?? current.tagline ?? current.frequency ?? 'Tap to change station')}

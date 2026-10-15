@@ -3,7 +3,7 @@ import { CalendarHeart, Compass, Map as MapIcon, MessageSquareHeart, Sparkles, U
 import { useAuth } from '@/lib/auth';
 import { RadioProvider } from '@/lib/radio';
 import { ActivityConsentCard, HereBanner } from './ActivityConsent';
-import { RadioButton, RadioDock, RadioSheet } from './Radio';
+import { RadioButton, RadioDock, RadioPreviewPill, RadioSheet } from './Radio';
 
 const TABS = [
   { to: '/', label: 'Explore', icon: Compass, end: true },
@@ -89,6 +89,7 @@ function Shell() {
       <ActivityConsentCard />
       <RadioDock />
       <RadioSheet />
+      <RadioPreviewPill />
 
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-[1500] bg-night-950/95 backdrop-blur-md border-t border-white/10 pb-[env(safe-area-inset-bottom)]">
         <div className="h-16 grid grid-cols-5">

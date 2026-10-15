@@ -2,10 +2,12 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import { initTheme } from './lib/theme';
+import { initRadioPreview } from './lib/radio';
 import './index.css';
 
 // Paint the cached/previewed theme before the first render (no palette flash).
 initTheme();
+initRadioPreview();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

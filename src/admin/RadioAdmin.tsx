@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, ImagePlus, Play, Plus, Radio as RadioIcon, Square, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Eye, ImagePlus, Play, Plus, Radio as RadioIcon, Square, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { compressImage, deleteMedia, uploadBlob } from '@/lib/images';
 import { attachStream, fetchNowPlaying, type RadioStation } from '@/lib/radio';
@@ -454,9 +454,23 @@ export default function RadioAdmin() {
                   <input className={inputClass} value={partnerUrl} inputMode="url" onChange={(e) => setPartnerUrl(e.target.value)} placeholder="https://…" />
                 </Field>
               </div>
-              <Button variant="secondary" loading={savingSettings} onClick={() => saveSettings()}>
-                Save partner details
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="secondary" loading={savingSettings} onClick={() => saveSettings()}>
+                  Save partner details
+                </Button>
+                <a
+                  href="/?radio=preview"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-extrabold text-slate-700 bg-slate-100 hover:bg-slate-200"
+                >
+                  <Eye className="w-4 h-4" /> Preview on the site
+                </a>
+              </div>
+              <p className="text-xs font-semibold text-slate-500">
+                Preview opens the site in a new tab with the player shown to you only, even while it’s switched off and before stations have
+                stream URLs. Save the partner details first to see them in it.
+              </p>
             </div>
           </Panel>
 
