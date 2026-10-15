@@ -1,7 +1,9 @@
 import { NavLink, Outlet, Link } from 'react-router-dom';
 import { CalendarHeart, Compass, Map as MapIcon, MessageSquareHeart, Sparkles, UserRound } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
+import { RadioProvider } from '@/lib/radio';
 import { ActivityConsentCard, HereBanner } from './ActivityConsent';
+import { RadioButton, RadioDock, RadioSheet } from './Radio';
 
 const TABS = [
   { to: '/', label: 'Explore', icon: Compass, end: true },
@@ -43,13 +45,23 @@ export function Logo() {
 
 /** Desktop: top bar. Phones: bottom tab bar (the map page sizes itself around both). */
 export function Layout() {
+  // The radio lives here so a stream keeps playing across public pages.
+  return (
+    <RadioProvider>
+      <Shell />
+    </RadioProvider>
+  );
+}
+
+function Shell() {
   const { profile } = useAuth();
   return (
     <div className="min-h-dvh flex flex-col">
       <header className="hidden md:block sticky top-0 z-[1500] h-16 bg-night-950/80 backdrop-blur-md border-b border-white/10">
         <div className="max-w-6xl mx-auto h-full px-6 flex items-center justify-between">
           <Logo />
-          <nav className="flex items-center gap-1">
+          <nav className="flex items-center gap-1 min-w-0">
+            <RadioButton className="mr-2 flex items-center gap-2 max-w-[11rem] px-3.5 py-2 rounded-2xl font-bold text-sm text-night-200 hover:text-white bg-white/5 hover:bg-white/10 ring-1 ring-white/10" />
             {TABS.map(({ to, label, icon: Icon, end }) => (
               <NavLink
                 key={to}
@@ -69,12 +81,14 @@ export function Layout() {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col pb-[calc(64px+env(safe-area-inset-bottom))] md:pb-0">
+      <main className="flex-1 flex flex-col pb-[calc(64px+var(--radio-dock,0px)+env(safe-area-inset-bottom))] md:pb-[var(--radio-dock,0px)]">
         <Outlet />
       </main>
 
       <HereBanner />
       <ActivityConsentCard />
+      <RadioDock />
+      <RadioSheet />
 
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-[1500] bg-night-950/95 backdrop-blur-md border-t border-white/10 pb-[env(safe-area-inset-bottom)]">
         <div className="h-16 grid grid-cols-5">

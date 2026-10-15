@@ -27,7 +27,7 @@ export function ActivityConsentCard() {
         initial={{ y: 40, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         exit={{ y: 40, opacity: 0 }}
-        className="fixed z-[2500] inset-x-3 bottom-[calc(76px+env(safe-area-inset-bottom))] md:inset-x-auto md:right-6 md:bottom-6 md:w-[380px]"
+        className="fixed z-[2500] inset-x-3 bottom-[calc(76px+var(--radio-dock,0px)+env(safe-area-inset-bottom))] md:inset-x-auto md:right-6 md:bottom-[calc(24px+var(--radio-dock,0px))] md:w-[380px]"
         role="dialog"
         aria-label="Share live activity"
       >
@@ -117,7 +117,7 @@ export function HereBanner() {
   const venue = here ? venueById.get(here) : undefined;
   if (!venue || dismissed === here || pathname.startsWith('/map')) return null;
   return (
-    <div className="fixed z-[1400] left-3 bottom-[calc(76px+env(safe-area-inset-bottom))] md:left-auto md:right-6 md:bottom-6 flex items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-full bg-night-900/95 backdrop-blur ring-1 ring-brand-400/40 glow-brand-soft text-xs font-extrabold text-white">
+    <div className="fixed z-[1400] left-3 bottom-[calc(76px+var(--radio-dock,0px)+env(safe-area-inset-bottom))] md:left-auto md:right-6 md:bottom-[calc(24px+var(--radio-dock,0px))] flex items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-full bg-night-900/95 backdrop-blur ring-1 ring-brand-400/40 glow-brand-soft text-xs font-extrabold text-white">
       <span className="heat-dot pulse text-brand-400" />
       <Link to={`/v/${venue.slug}`} className="hover:text-brand-200 truncate max-w-[60vw]">
         You’re at {venue.name}

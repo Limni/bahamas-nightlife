@@ -18,6 +18,7 @@ import { FilterSheet, SearchFilterBar } from '@/components/FilterSheet';
 import { EmptyState, HeatBadge } from '@/components/ui';
 import { SetupNotice } from '@/components/SetupNotice';
 import { Logo } from '@/components/Layout';
+import { RadioButton } from '@/components/Radio';
 
 type Sort = 'featured' | 'buzzing' | 'popular' | 'rated' | 'nearest' | 'az' | 'newest';
 type View = 'grid' | 'list';
@@ -404,6 +405,7 @@ export default function Explore() {
                 <Link to="/crawl" className={pill}>
                   <Route className="w-4 h-4" /> Plan a crawl
                 </Link>
+                <RadioButton className={`${pill} max-w-full min-w-0`} />
                 {suggestionExists && (
                   <button
                     onClick={() => apply({ [m.suggestion.key]: [m.suggestion.value] })}

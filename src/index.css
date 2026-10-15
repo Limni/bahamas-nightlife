@@ -322,6 +322,32 @@ h1, h2, h3, h4, h5, h6, .font-display {
 }
 
 /* ---------------------------------------------------------------------------
+   Live radio (components/Radio.tsx)
+   --------------------------------------------------------------------------- */
+.eq-bars { display: inline-flex; align-items: flex-end; gap: 2px; width: 15px; height: 13px; }
+.eq-bars i { flex: 1; height: 100%; border-radius: 1px; background: currentColor; transform-origin: bottom; transform: scaleY(0.3); }
+.eq-bars i:nth-child(2) { transform: scaleY(0.6); }
+.eq-bars i:nth-child(3) { transform: scaleY(0.45); }
+.eq-bars.is-playing i { animation: eq-bounce 0.9s ease-in-out infinite alternate; }
+.eq-bars.is-playing i:nth-child(2) { animation-duration: 0.7s; animation-delay: -0.35s; }
+.eq-bars.is-playing i:nth-child(3) { animation-duration: 1.1s; animation-delay: -0.6s; }
+.eq-bars.is-playing i:nth-child(4) { animation-duration: 0.8s; animation-delay: -0.15s; }
+@keyframes eq-bounce { from { transform: scaleY(0.2); } to { transform: scaleY(1); } }
+
+.radio-fade { animation: radio-fade 0.18s ease-out; }
+.radio-rise { animation: radio-rise 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes radio-fade { from { opacity: 0; } }
+@keyframes radio-rise { from { opacity: 0; transform: translateY(24px); } }
+
+.radio-volume { accent-color: var(--color-brand-500); height: 4px; cursor: pointer; }
+
+@media (prefers-reduced-motion: reduce) {
+  .eq-bars.is-playing i,
+  .radio-fade,
+  .radio-rise { animation: none !important; }
+}
+
+/* ---------------------------------------------------------------------------
    Map — same marker language as Island GO, on a dark basemap
    --------------------------------------------------------------------------- */
 @keyframes pulse {

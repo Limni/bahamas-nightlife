@@ -1835,18 +1835,19 @@ drop policy if exists "Editors manage menu items" on public.menu_items;
 create policy "Editors manage menu items" on public.menu_items
   for all using (public.is_editor()) with check (public.is_editor());
 
--- Spot media in storage (<venue_id>/…), not event flyers (events/…).
+-- Spot media in storage (<venue_id>/…), not event flyers (events/…) or
+-- radio station logos (radio/…).
 drop policy if exists "Editors upload venue media" on storage.objects;
 create policy "Editors upload venue media" on storage.objects
-  for insert with check (bucket_id = 'venue-media' and (storage.foldername(name))[1] <> 'events' and public.is_editor());
+  for insert with check (bucket_id = 'venue-media' and (storage.foldername(name))[1] not in ('events', 'radio') and public.is_editor());
 
 drop policy if exists "Editors update venue media" on storage.objects;
 create policy "Editors update venue media" on storage.objects
-  for update using (bucket_id = 'venue-media' and (storage.foldername(name))[1] <> 'events' and public.is_editor());
+  for update using (bucket_id = 'venue-media' and (storage.foldername(name))[1] not in ('events', 'radio') and public.is_editor());
 
 drop policy if exists "Editors delete venue media" on storage.objects;
 create policy "Editors delete venue media" on storage.objects
-  for delete using (bucket_id = 'venue-media' and (storage.foldername(name))[1] <> 'events' and public.is_editor());
+  for delete using (bucket_id = 'venue-media' and (storage.foldername(name))[1] not in ('events', 'radio') and public.is_editor());
 
 create or replace function public.admin_set_editor(p_user uuid, p_editor boolean)
 returns void
@@ -1874,3 +1875,60 @@ $$;
 
 revoke execute on function public.admin_set_editor(uuid, boolean) from public, anon;
 grant execute on function public.admin_set_editor(uuid, boolean) to authenticated;
+
+-- =============================================================================
+-- Live radio: a partner broadcaster's stations, played by an opt-in mini-player
+-- on the public site (nothing plays or downloads until a visitor taps a
+-- station). The admin switches the player on in /admin/radio, names the
+-- partner ("Presented by …") and manages the stations.
+--
+-- Streams must be HTTPS (an http:// stream won't play on an https page). The
+-- public only sees enabled stations that have a stream URL, so the seeded
+-- stations stay hidden until the broadcaster's URLs are filled in.
+-- =============================================================================
+alter table public.site_settings add column if not exists radio_enabled boolean not null default false;
+alter table public.site_settings add column if not exists radio_partner text check (radio_partner is null or char_length(radio_partner) <= 80);
+alter table public.site_settings add column if not exists radio_partner_url text check (radio_partner_url is null or radio_partner_url ~ '^https?://');
+
+create table if not exists public.radio_stations (
+  id          uuid primary key default gen_random_uuid(),
+  slug        text not null unique check (slug ~ '^[a-z0-9-]{1,40}$'),  -- stable id for analytics + "last station"
+  name        text not null check (char_length(name) between 1 and 40),
+  frequency   text check (frequency is null or char_length(frequency) <= 20),   -- "100.3 FM"
+  tagline     text check (tagline is null or char_length(tagline) <= 80),       -- genre line
+  stream_url  text check (stream_url is null or stream_url ~ '^https://'),
+  backup_url  text check (backup_url is null or backup_url ~ '^https://'),      -- tried once if the main stream fails
+  meta_url    text check (meta_url is null or meta_url ~ '^https://'),          -- now-playing (Icecast/Shoutcast JSON, XML, text)
+  website     text check (website is null or website ~ '^https?://'),
+  logo_url    text,
+  logo_path   text,                                                            -- venue-media radio/… (for deletes)
+  color       text check (color is null or color ~ '^#[0-9a-fA-F]{6}$'),     -- the station's brand colour, used sparingly
+  sort        int  not null default 0,
+  is_enabled  boolean not null default true,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+drop trigger if exists radio_stations_touch on public.radio_stations;
+create trigger radio_stations_touch
+  before update on public.radio_stations
+  for each row execute function public.touch_updated_at();
+
+alter table public.radio_stations enable row level security;
+
+drop policy if exists "Live radio stations are public" on public.radio_stations;
+create policy "Live radio stations are public" on public.radio_stations
+  for select using ((is_enabled and stream_url is not null) or public.is_admin());
+
+drop policy if exists "Admins manage radio stations" on public.radio_stations;
+create policy "Admins manage radio stations" on public.radio_stations
+  for all using (public.is_admin()) with check (public.is_admin());
+
+-- The partner's four stations. Frequencies and genre lines come from public
+-- listings; confirm them (and add stream URLs, logos) in /admin/radio.
+insert into public.radio_stations (slug, name, frequency, tagline, color, website, sort) values
+  ('100-jamz', '100 Jamz', '100.3 FM', 'R&B, hip-hop, reggae, soca & Junkanoo', '#f59e0b', 'https://www.100jamz.com', 1),
+  ('joy-fm',   'Joy FM',   '101.9 FM', 'Gospel & inspiration',                  '#22c55e', null, 2),
+  ('kiss-fm',  'Kiss FM',  '96.1 FM',  'Adult contemporary hits',               '#ef4444', null, 3),
+  ('y98-fm',   'Y98 FM',   '98.7 FM',  'Hot adult contemporary',                '#3b82f6', null, 4)
+on conflict (slug) do nothing;

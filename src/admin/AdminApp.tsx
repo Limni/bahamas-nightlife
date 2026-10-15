@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, Link } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
-import { Activity, CalendarHeart, ExternalLink, Inbox as InboxIcon, ListChecks, LogOut, Palette, Plus, Star, Tags, Martini, Users } from 'lucide-react';
+import { Activity, CalendarHeart, ExternalLink, Inbox as InboxIcon, ListChecks, LogOut, Palette, Plus, Radio, Star, Tags, Martini, Users } from 'lucide-react';
 import { supabase, supabaseConfigured } from '@/lib/supabase';
 import { SetupNotice } from '@/components/SetupNotice';
 import { Spinner } from '@/components/ui';
@@ -13,6 +13,7 @@ import Inbox from './Inbox';
 import TagsManager from './TagsManager';
 import ReviewsModeration from './ReviewsModeration';
 import ThemeSettings from './ThemeSettings';
+import RadioAdmin from './RadioAdmin';
 import EventsList from './EventsList';
 import EventEditor from './EventEditor';
 import ActivityAdmin from './ActivityAdmin';
@@ -92,6 +93,7 @@ const NAV = [
   { to: '/admin/users', label: 'Members', icon: Users, end: false, phone: false },
   { to: '/admin/tags', label: 'Tags', icon: Tags, end: false, phone: false },
   { to: '/admin/theme', label: 'Theme', icon: Palette, end: false, phone: false },
+  { to: '/admin/radio', label: 'Radio', icon: Radio, end: false, phone: false },
 ];
 
 
@@ -125,7 +127,7 @@ function Shell({ session, role }: { session: Session; role: 'admin' | 'editor' }
             <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-glow-500 flex items-center justify-center shrink-0">
               <Martini className="w-4 h-4 text-white" />
             </span>
-            <span className="font-display font-black truncate md:hidden xl:inline">Nassau Nights <span className="text-brand-400 font-bold">{editor ? 'Editor' : 'Admin'}</span></span>
+            <span className="font-display font-black truncate md:hidden 2xl:inline">Nassau Nights <span className="text-brand-400 font-bold">{editor ? 'Editor' : 'Admin'}</span></span>
           </Link>
           <nav className="hidden md:flex items-center gap-1">
             {nav.map(({ to, label, icon: Icon, end }) => (
@@ -182,6 +184,7 @@ function Shell({ session, role }: { session: Session; role: 'admin' | 'editor' }
           <Route path="reviews" element={<ReviewsModeration />} />
           <Route path="tags" element={<TagsManager />} />
           <Route path="theme" element={<ThemeSettings />} />
+          <Route path="radio" element={<RadioAdmin />} />
           <Route path="events" element={<EventsList />} />
           <Route path="events/:id" element={<EventEditor />} />
           <Route path="activity" element={<ActivityAdmin />} />

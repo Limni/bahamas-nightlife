@@ -121,7 +121,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     <ThemeContext.Provider value={{ theme: themeById(shownId), activeId, previewId, setActive, exitPreview }}>
       {children}
       {previewId && previewId !== activeId && (
-        <div className="fixed left-3 bottom-[calc(76px+env(safe-area-inset-bottom))] md:bottom-4 z-[1600] flex items-center gap-2 pl-3.5 pr-1.5 py-1.5 rounded-full bg-night-800 text-white ring-1 ring-white/10 text-xs font-extrabold shadow-xl">
+        <div className="fixed left-3 bottom-[calc(76px+var(--radio-dock,0px)+env(safe-area-inset-bottom))] md:bottom-4 z-[1600] flex items-center gap-2 pl-3.5 pr-1.5 py-1.5 rounded-full bg-night-800 text-white ring-1 ring-white/10 text-xs font-extrabold shadow-xl">
           <Eye className="w-4 h-4 text-glow-300" />
           Previewing {themeById(previewId).name}
           <button onClick={exitPreview} className="p-1 rounded-full hover:bg-white/15" aria-label="Exit theme preview">

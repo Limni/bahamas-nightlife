@@ -7,6 +7,7 @@ Guidance for AI coding agents (and humans) working in this repository. Read this
 **Nassau Nights** (https://nassaunights.limniatis.com) is a nightlife guide for Nassau, Bahamas: bars, clubs, lounges, beach bars and events. It is a **clone of Nassau Eats** (`Limni/bahamas-nassaueats`), restyled as a dark neon site, with two features the eats site doesn't have:
 
 - **Highlighted events**, ported from Island GO (`Limni/bahamas-exp`). Events are one-off (a date range) or **weekly/recurring** (weekly hours, optionally with no end date: "Ladies Night every Friday"), and live ones pulse on the map.
+- **Live radio** from a partner broadcaster (100 Jamz, Joy FM, Kiss FM, Y98 FM): an opt-in station picker and a mini-player that keeps playing across pages.
 - **Live, GPS-based activity.** Visitors who opt in send anonymous presence pings. The database turns them into "how busy is it now" per venue, compared with that venue's usual for the weekday and hour (8-week average), plus 30-day popularity. It updates in real time over Supabase Realtime.
 
 Everything else is Nassau Eats: directory, map, venue pages with drinks menus/photos/reviews, member accounts, community suggestions and the phone-friendly admin console. On top, admins can make members **venue managers** who update their own venues from `/manage`, and **editors** who add and edit any spot in the admin console (and nothing else).
@@ -43,6 +44,7 @@ There is **no test suite**. To verify a change, run `npm run lint` and `npm run 
 | lucide-react | **1.x** | **Brand icons (Instagram, Facebook…) were removed** in 1.x. Use generic icons |
 | @supabase/supabase-js | 2 | single client in `src/lib/supabase.ts` |
 | exifr | 7 | lazy-imported, reads GPS from photo EXIF |
+| hls.js | 1.7 | lazy, **light** build (`hls.js/light`, typed via `src/hls-light.d.ts`); loaded only when someone plays an HLS station outside Safari |
 | @ffmpeg/ffmpeg + @ffmpeg/core | 0.12 | admin-only, lazy: re-encodes short videos in the browser (single-thread core, self-hosted ~32 MB wasm) |
 
 Path alias: `@/` → `src/` (in both `vite.config.ts` and `tsconfig.json`).
@@ -64,6 +66,8 @@ src/
     auth.tsx               AuthProvider/useAuth — member accounts (session, profile, isAdmin)
     directory.tsx          DirectoryProvider (venues, upcoming events, tags, ratings) + LocationProvider
     favorites.tsx          FavoritesProvider/useFavorites: the member's favourite spot ids, toggle, signed-out prompt
+    radio.tsx              RadioProvider/useRadio: radio settings + stations, playback (one stream), now-playing
+                           parser/poller, Media Session, GA events; attachStream() (hls.js on demand)
     activity.tsx           ActivityProvider/useActivity: consent, nightly device id, presence pings,
                            venue_activity() fetch + Realtime; heatFor()/HEAT_META levels; usePopularTimes()
     crawl.ts               bar crawl planner: candidates, scoring at arrival time, beam search, travel estimates,
@@ -97,6 +101,8 @@ src/
     Reviews.tsx            ReviewsSection (summary, own review form, list)
     Lightbox.tsx           full-screen photo/video viewer
     Media.tsx              MediaStill (photo, or video poster + play badge), VideoBadge, toLightbox
+    Radio.tsx              RadioButton ("Live radio"), RadioSheet (station picker), RadioDock (mini-player),
+                           StationLogo, EqBars
     FavoriteButton.tsx     heart that saves a spot to favourites (overlay / hero / tile variants)
     SetupNotice.tsx        shown when Supabase env vars are missing
   pages/
@@ -133,6 +139,7 @@ src/
     ReviewsModeration.tsx  hide/unhide/delete member reviews
     TagsManager.tsx        manage category/vibe/area vocabularies
     ThemeSettings.tsx      pick the public site theme
+    RadioAdmin.tsx         /admin/radio: player switch, partner credit, stations (test stream / now playing, logo, order)
     UsersAdmin.tsx         member accounts: search, admin access, suspend, confirm, reset, delete
 supabase/
   schema.sql               THE database definition (idempotent, re-runnable)
@@ -163,12 +170,12 @@ README.md, DEPLOY.md       human docs
 | `/community` | Community | `?kind=new_spot\|update\|closed\|event\|other&venue=<id>&field=menu\|photos\|hours\|phone` pre-fills the form |
 | `/account` | Account | `?mode=signup`, `?next=/path` (in-app paths only; validated by `safeNext`); `#activity` is the sharing switch |
 | `/manage/*` | ManagerApp | `/manage` (My venues), `/manage/v/:id` (own venues only; `#menu` etc. scroll to a panel), `/manage/events`, `/manage/events/new?venue=`, `/manage/events/:id`. Signed out → `/account?next=/manage` |
-| `/admin/*` | AdminApp | Editors get only `/admin`, `/admin/new`, `/admin/v/:id` (anything else redirects to `/admin`). Admins: `/admin`, `/admin/new`, `/admin/v/:id`, `/admin/events`, `/admin/events/new?venue=&notes=`, `/admin/events/:id`, `/admin/inbox`, `/admin/activity`, `/admin/reviews`, `/admin/users`, `/admin/tags`, `/admin/theme` |
+| `/admin/*` | AdminApp | Editors get only `/admin`, `/admin/new`, `/admin/v/:id` (anything else redirects to `/admin`). Admins: `/admin`, `/admin/new`, `/admin/v/:id`, `/admin/events`, `/admin/events/new?venue=&notes=`, `/admin/events/:id`, `/admin/inbox`, `/admin/activity`, `/admin/reviews`, `/admin/users`, `/admin/tags`, `/admin/theme`, `/admin/radio` |
 | `*` | → `/` | |
 
 Public pages render inside `<Layout/>` (5 tabs: Explore, Map, Events, Community, Account). `/admin` does not; it has its own light shell. The admin console is reachable **only by URL**, except an "Admin console" button on `/account` for admins. `/manage` has its own light shell too, linked from a **Venue manager** card on `/account` for members who manage a venue.
 
-Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > FavoritesProvider > DirectoryProvider > LocationProvider > ActivityProvider > FiltersProvider > Suspense > Routes`.
+Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > FavoritesProvider > DirectoryProvider > LocationProvider > ActivityProvider > FiltersProvider > Suspense > Routes`. `RadioProvider` wraps the public `<Layout/>` (not the admin), so a stream survives route changes; it stops when you leave for `/admin` or `/manage`.
 
 ## Data layer (client)
 
@@ -217,7 +224,8 @@ Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > Fav
 | `tags` | filter vocabularies | `kind 'category'\|'vibe'\|'area'`, `label`, `sort`; unique `(kind,label)`; seeded with starter values |
 | `submissions` | community suggestions | `kind 'new_spot'\|'update'\|'closed'\|'event'\|'other'`, `venue_id`, `venue_name`, `fields text[]`, `message`, `contact_name`, `contact_email`, `credit_ok`, `photo_paths text[]` (≤6), `status 'new'\|'reviewing'\|'done'\|'dismissed'`, `admin_note` (private), `resolved_at` (trigger-set), `user_id` (default `auth.uid()`, null for anonymous) |
 | `profiles` | public member profile | `id` → `auth.users`, `display_name` (1–40 chars). Created by the `on_auth_user_created` trigger from sign-up metadata `display_name`. Existing users are backfilled |
-| `site_settings` | one row (`id = true`) of site-wide settings | `theme` (theme id, default `'neon'`; format-checked only, so new themes need no migration), `updated_at`. In the Realtime publication |
+| `site_settings` | one row (`id = true`) of site-wide settings | `theme` (theme id, default `'neon'`; format-checked only, so new themes need no migration), **`radio_enabled`** (default false), `radio_partner` (≤ 80, "Presented by"), `radio_partner_url`, `updated_at`. In the Realtime publication |
+| `radio_stations` | the partner's radio stations | `slug` (unique, stable: analytics + "last station"), `name`, `frequency`, `tagline` (genre line), `stream_url` / `backup_url` / `meta_url` (**https only**, checked), `website`, `logo_url`/`logo_path` (`venue-media` `radio/<id>/…`), `color` (`#rrggbb`), `sort`, `is_enabled`. Seeded with 100 Jamz, Joy FM, Kiss FM and Y98 FM (no stream URLs) |
 | `events` | highlighted nights | `title`, `description`, `venue_id` (nullable, `on delete set null`), own `lat`/`lng`/`address` (else the venue's pin is used), `start_date`, `end_date` (check end ≥ start; **null = repeats until further notice**), `hours jsonb` (weekly windows; set = a weekly event), `image_url`/`image_path` (**derived** from `event_media`, see below; don't write them from the app), `price_note ≤80`, `ticket_url`, `is_published`, `is_featured`, timestamps. In Realtime |
 | `presence` | **one row per device** currently at a venue | `device_id` PK, `venue_id`, `arrived_at`, `last_seen`, `counted_hour`. **No RLS policies: nobody can read it**; only the security-definer functions touch it. Never stores coordinates |
 | `venue_hourly` | hourly tallies | `(venue_id, hour_start)` PK, `visitors` (distinct phones that hour), `arrivals` (visits that started). Admin read only. Trimmed after 180 days |
@@ -236,6 +244,7 @@ Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > Fav
 | `venue_managers` | own rows (+ admins) | admins only |
 | `tags` | everyone | admins |
 | `site_settings` | everyone | admins update (no insert/delete; the row is seeded) |
+| `radio_stations` | enabled stations **with a stream URL** for anyone; all for admins | admins |
 | `submissions` | admins | **anyone can insert**, but only as `status='new'` with no `admin_note`/`resolved_at` and `user_id` null or self; admins update/delete |
 | `profiles` | everyone (only `display_name` exists) | the owner updates their own (not while suspended); admins update any |
 | `events` | published for anyone; everything for admins; managers also see their venues' drafts | admins; managers insert/update/delete events whose `venue_id` is one of their venues (they can't move one elsewhere or create one without a venue) |
@@ -276,7 +285,7 @@ Only admins may change `reviews.is_hidden`. The `reviews_guard` trigger forces `
 
 ### Storage buckets
 
-- `venue-media` is **public read**; admins (and managers, for their venues/events; editors, for any `<venue_id>/…` path but not `events/…`) can write. **25 MB per file**; images plus `video/mp4`, `video/webm`, `video/quicktime`. Paths are `<venue_id>/<gallery|menu>/<timestamp>-<rand>.<ext>` (event flyers and videos: `events/<event_id>/…`; a video's poster sits next to it as a `.jpg`), uploaded with a 1-year cache. A unique path per upload means replacing an image changes its URL. Deleting a video row must delete both `storage_path` and `poster_path`.
+- `venue-media` is **public read**; admins (and managers, for their venues/events; editors, for any `<venue_id>/…` path but not `events/…` or `radio/…`) can write. **25 MB per file**; images plus `video/mp4`, `video/webm`, `video/quicktime`. Paths are `<venue_id>/<gallery|menu>/<timestamp>-<rand>.<ext>` (event flyers and videos: `events/<event_id>/…`; a video's poster sits next to it as a `.jpg`), uploaded with a 1-year cache. A unique path per upload means replacing an image changes its URL. Deleting a video row must delete both `storage_path` and `poster_path`.
 - `submission-uploads` is **private**. Anyone may upload into `inbox/` (8 MB max, images only); only admins can read (the admin Inbox uses signed URLs) or delete.
 
 ### Hours format
@@ -324,6 +333,18 @@ Phase 1 of [docs/bar-crawl.md](docs/bar-crawl.md) (read it before extending this
 - `ActivitySharingToggle` on `/account` (signed in or out) with the privacy explanation.
 - `HereBanner` thanks the visitor while they're counted at a venue (hidden on `/map`).
 - The privacy copy states the rules (venue only, nightly ID, ≥ 2 people). Keep it true if the SQL changes.
+
+### Live radio (`lib/radio.tsx`, `components/Radio.tsx`, `admin/RadioAdmin.tsx`)
+- **Opt-in only:** nothing is created, buffered or fetched until a visitor taps a station (`preload="none"`, a fresh `Audio` per play). "Pause" is a **stop** (detach the source): a paused live stream keeps downloading and resumes behind live. One stream at a time.
+- **Entry points:** a "Live radio" pill in the Explore hero and in the desktop header (`RadioButton`, hidden unless `radio_enabled` and a station has a stream). It opens `RadioSheet`: a 2×2 grid of station tiles (logo or initials, frequency, now playing or genre line, state), "Presented by" the partner. Starting a station closes the sheet; the last station is remembered (`localStorage` `radio:last`).
+- **Mini-player** (`RadioDock`): above the phone tab bar / bottom-right on desktop (with a volume slider; phones use hardware volume), LIVE dot, now playing, stop/play, close; tapping it reopens the picker. On `/map` it shrinks to a pill (bottom-left on phones, bottom-centre on desktop) so it doesn't cover the map controls. While docked it sets the CSS variable **`--radio-dock`** on `<html>`; other bottom-floating UI (`HereBanner`, `ActivityConsentCard`, the theme preview pill, `main`'s bottom padding) adds it to its `bottom`. New floating UI must do the same.
+- **Failures:** the main stream fails → `backup_url` once → "Off air right now · tap play to retry". A live stream `ended` counts as a failure.
+- **Formats:** MP3/AAC (Icecast/Shoutcast) attach synchronously so `play()` stays inside the tap (iOS). HLS (`.m3u8`) plays natively in Safari, elsewhere via the lazy hls.js light chunk. Streams must be **HTTPS** (DB check; mixed content won't play).
+- **Now playing** (`parseNowPlaying`): Icecast `status-json.xsl`, Shoutcast v2 JSON / v1 XML, AzuraCast, Radio.co, play-history XML (`<song><title><artist>`, e.g. 100 Jamz's securenetsystems feed), generic `title`/`artist`, or plain text; ALL CAPS is title-cased. Polled every 30 s for all stations while the picker is open, every 20 s for the current station while it plays, never while stopped or the tab is hidden. A host that blocks cross-origin requests simply shows the genre line (fix: ask the host to allow it, or proxy it through nginx).
+- **Lock screen / headset:** Media Session metadata (track, station · frequency, logo) and play/pause/stop; next/previous track switches station.
+- **Analytics (GA4):** `radio_play` `{station, station_name}` and `radio_listen` `{station, minutes: 5}` every 5 minutes of playing. Register `station` as a custom dimension in GA4 to report per station.
+- **Admin** (`/admin/radio`, admins only): master switch (saves at once) + partner name/link; station list with status (Ready / Needs stream URL / Off), reorder, and a form per station with **Test** (plays the stream in the console), **Check** (reads now playing), logo upload (512 px, `radio/<id>/`), brand colour, Enabled, delete.
+- The station's brand colour appears only on its logo frame and its tile's selected edge; everything else follows the site theme.
 
 ### Favourites (`lib/favorites.tsx`, `components/FavoriteButton.tsx`)
 - A heart on every spot card (`VenueCard` photo corner, `VenueRow` right edge; a sibling of the card's link, never inside it), beside Share on the venue page hero (published spots only), and a **Save** tile in the map drawer.
@@ -545,6 +566,7 @@ There are no tests. A practical loop:
   - register `nassaunights.limniatis.com`, `nassaunights.com` and `www.nassaunights.com` with Stadia; DNS + host nginx (`deploy/`); a self-hosted runner and the two repo secrets.
 - **Not yet verified end to end:** against a real Supabase project (Realtime delivery of `venue_live`, Storage uploads of flyers), and the Docker image on the server.
 - **Limits of live activity:** counts only people who opted in while the site is open (no background tracking on the web); anyone can call `report_presence` with invented coordinates (rate limits and dwell blunt it, but levels are indicative, not audited); events with their own location have no activity geofence.
+- **Radio:** the seeded stations have no stream URLs. The stations' public web players use session-tokened stream addresses (e.g. 100 Jamz's securenetsystems URL returns 403 without one), so the broadcaster must supply direct HTTPS stream URLs (and now-playing feeds) before the player is switched on.
 - **Not built:**
   - OAuth logins (Google/Apple);
   - review photos, replies, likes, and review reporting by visitors;
