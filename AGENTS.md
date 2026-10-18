@@ -28,7 +28,7 @@ npm run lint         # type-check only (tsc --noEmit); there is no ESLint
 npm run seed:google  # import Google Places venues as drafts (see below)
 ```
 
-There is **no test suite**. To verify a change, run `npm run lint` and `npm run build`, then check it in a browser (see "Verifying UI changes").
+Run `npm run lint`, `npm run build`, and `node --test tests/canonical-build.test.mjs`, then check changes in a browser (see "Verifying UI changes"). The focused tests cover canonical HTML generation and origin consistency.
 
 ## Stack (versions matter)
 
@@ -505,7 +505,7 @@ It does not import photos. It requires the `google_place_id` column, so re-run `
 
 The full runbook is in **`DEPLOY.md`**. The essentials:
 - **CI** (`.github/workflows/deploy.yml`): a push to `main` builds the image on `ubuntu-latest` and pushes it to `ghcr.io/limni/bahamas-nightlife` (`:latest` and `:<sha>`). Then a **self-hosted runner registered to this repo** (separate from Island GO's runner; runners are per repo) pulls the image and runs container `nassaunights` on **`127.0.0.1:5110`**. Concurrency group: `deploy-nassaunights`.
-- **Container:** `Dockerfile` is a two-stage build (`node:22-alpine` → `nginx:1.27-alpine`). `npm ci` falls back to `npm install` because the lockfile is generated on Windows and lacks Linux optional binaries. `nginx.conf` provides the SPA fallback to `index.html`, immutable `/assets/` caching, and `no-cache` for `index.html` and `sw.js`.
+- **Container:** `Dockerfile` is a two-stage build (`node:22-alpine` → `nginx:1.27-alpine`). `npm ci` falls back to `npm install` because the lockfile is generated on Windows and lacks Linux optional binaries. `nginx.conf` provides per-route canonical HTML and the SPA fallback to `spa.html`, immutable `/assets/` caching, and `no-cache` for `index.html` and `sw.js`.
 - **Host nginx:** `deploy/nassaunights.limniatis.com.conf` defines upstream `nassaunights_app` → `127.0.0.1:5110`, with `:80` and **`:443`** server blocks. The `:443` block includes `/etc/nginx/snippets/nassaunights-ssl.conf`.
   - Cloudflare runs in **Full** mode. Without a `:443` block, nginx would answer this host with **Island GO** (its default TLS server).
   - `sudo ./deploy/enable-https.sh` copies Island GO's certificate lines into that snippet, installs and enables the vhost, runs `nginx -t`, and **rolls back on failure**.
@@ -520,7 +520,7 @@ The full runbook is in **`DEPLOY.md`**. The essentials:
   | `$connection_upgrade` map | defines it in `conf.d/islandgo-upgrade-map.conf` | **reuses** it; never define it twice. `deploy/nassaunights-upgrade-map.conf` is only for servers without it |
 
 - **DNS:** Cloudflare `nassaunights` record, proxied. A first-level subdomain is covered by `*.limniatis.com` Universal SSL.
-- **Second domain:** the vhost's `server_name` also lists `nassaunights.com` and `www.nassaunights.com` (served directly, no redirect). That zone must be proxied by Cloudflare in **Full** (not strict) mode, because the origin reuses Island GO's certificate. The app has no hard-coded domain: auth email links use `window.location.origin`.
+- **Second domain:** the vhost's `server_name` also lists `nassaunights.com` and `www.nassaunights.com` (the container redirects www to https://nassaunights.com, preserving path and query). That zone must be proxied by Cloudflare in **Full** (not strict) mode, because the origin reuses Island GO's certificate. SEO uses the official https://nassaunights.com origin; auth email links still use `window.location.origin`. See `docs/domains-and-seo.md`.
 - **Manual deploy:** `./deploy.sh build|deploy|update|logs|stop|status`. It reads `.env`, then `.env.local`.
 - **Analytics / SEO:** GA4 (`G-FWM1NM6DRJ`) is a plain gtag snippet in `index.html`; SPA route changes are counted by GA4 enhanced measurement (history events), so there is no router hook. `scripts/sitemap.mjs` builds the sitemap at build time with the anon key (RLS = published only) and never fails the build (no Supabase → fixed pages only). nginx serves `/sitemap.xml` and `/robots.txt` as files with a 1-hour cache.
 
