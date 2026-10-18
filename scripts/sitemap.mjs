@@ -9,7 +9,7 @@
 // SITE_URL picks the domain the URLs use (default https://nassaunights.com):
 // set it to the property you add in Google Search Console.
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 // Local builds: pick up .env / .env.local like Vite does (CI passes real env vars).
 for (const file of ['.env', '.env.local']) {
@@ -21,6 +21,9 @@ for (const file of ['.env', '.env.local']) {
 }
 
 const SITE = (process.env.SITE_URL || 'https://nassaunights.com').replace(/\/+$/, '');
+if (SITE !== 'https://nassaunights.com') {
+  throw new Error('SITE_URL must match the official canonical origin: https://nassaunights.com');
+}
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL ?? '';
 const ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY ?? '';
 const configured = SUPABASE_URL && ANON_KEY && !SUPABASE_URL.includes('YOUR-PROJECT');
@@ -87,3 +90,16 @@ Sitemap: ${SITE}/sitemap.xml
 writeFileSync('dist/sitemap.xml', xml);
 writeFileSync('dist/robots.txt', robots);
 console.log(`sitemap: wrote ${urls.length} URLs for ${SITE}`);
+
+// Serve a canonical in the initial HTML, before JavaScript runs. The fallback
+// remains untagged so a newly published page never inherits the homepage URL.
+const shell = readFileSync('dist/index.html', 'utf8');
+writeFileSync('dist/spa.html', shell);
+for (const { loc } of urls) {
+  if (!/^\/(?:events|map|crawl|community|v\/[a-zA-Z0-9-]+|events\/[a-zA-Z0-9-]+)?$/.test(loc)) {
+    throw new Error(`Unexpected canonical page path: ${loc}`);
+  }
+  const dir = loc === '/' ? 'dist' : `dist${loc}`;
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(`${dir}/index.html`, shell.replace('</head>', `    <link rel="canonical" href="${SITE}${loc}" />\n  </head>`));
+}

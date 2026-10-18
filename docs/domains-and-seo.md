@@ -1,42 +1,15 @@
-# Domains, canonical URLs and SEO (proposed)
+# Canonical domain
 
-## Today
+The official origin is **https://nassaunights.com** (confirmed October 18, 2026).
 
-The same site is served, with identical content and no canonical tags, on:
+- The application container redirects `www.nassaunights.com` to the same path and query on the official HTTPS origin with a 301. The host proxy already forwards `Host`, so this deploys through the normal app workflow without DNS, TLS, or host nginx changes. The legacy `nassaunights.limniatis.com` host remains accessible.
+- `scripts/sitemap.mjs` generates a canonical HTML shell for each public sitemap route, including the homepage, venues, and events. `SITE_URL`, when provided, must equal the official origin to prevent conflicting signals.
+- nginx serves those files before the SPA fallback. The separate `spa.html` fallback has no canonical, so account/admin pages and newly published routes never inherit the homepage canonical.
+- `CanonicalUrl` in `src/App.tsx` updates the existing tag on navigation, strips query/fragment variants, and removes it on account/admin/manager routes. Newly published venue/event routes receive their own canonical when rendered, then gain initial-HTML tags at the next build.
+- The sitemap and robots file keep using non-www URLs. A build still uses only public Supabase data and leaves authentication settings unchanged.
 
-- `nassaunights.com`
-- `www.nassaunights.com`
-- `nassaunights.limniatis.com`
+## Verification and rollback
 
-(`server_name` in `deploy/nassaunights.limniatis.com.conf` and the vhost embedded in `deploy/vm-setup.sh`.)
+Check homepage, venue, event, query-string and SPA navigation cases. Confirm www returns a 301 with path and query preserved, and non-www returns 200 without a redirect loop. Check that sitemap URLs match their HTML canonicals and that account/admin fallback HTML has no homepage canonical.
 
-Google doesn't penalise duplicates, but it **picks one** version of each page to show. It may pick the wrong host, and links and shares to the different hosts split ranking credit.
-
-## Fix (small, recommended regardless of other plans)
-
-Permanently redirect the extra hosts to the primary one in the host nginx:
-
-```nginx
-# In the :80 and :443 server blocks for the non-primary names, before proxying:
-server {
-    listen 443 ssl;
-    server_name www.nassaunights.com nassaunights.limniatis.com;
-    include /etc/nginx/snippets/nassaunights-ssl.conf;
-    return 301 https://nassaunights.com$request_uri;
-}
-```
-
-Then:
-- keep `nassaunights.com` alone in the main server block's `server_name`;
-- mirror the change in `deploy/vm-setup.sh`'s embedded vhost;
-- run `nginx -t` and reload (`enable-https.sh` already rolls back on failure);
-- keep all three in Supabase Auth Redirect URLs for a while (old emails still point at them).
-
-**Caveat:** the admin console on `nassaunights.limniatis.com` would then redirect too. Sessions are per origin, so you sign in again once on `nassaunights.com`.
-
-**Alternative** (no redirects): add `<link rel="canonical" href="https://nassaunights.com{path}">` per page, set from the router (one small component that updates the tag on route change). Redirects are simpler and stronger.
-
-## If the day site happens
-
-- Pages shown on both domains (a spot tagged day *and* night) need **one canonical** on the domain of its primary scene. A spot that's day-only opened on the night domain should redirect to the day domain.
-- **One sitemap per domain:** `scripts/sitemap.mjs` writes `sitemap-night.xml` / `sitemap-day.xml` (and robots files). nginx serves the right one per `$host`. Each domain gets its own Search Console property.
+The standard `main` deployment ships these files. Revert the canonical-domain commit and redeploy to roll back. No DNS change is required in either direction. Users previously signed in on www may need to sign in again on non-www because browser sessions are per origin; existing auth redirect allowlists remain unchanged.

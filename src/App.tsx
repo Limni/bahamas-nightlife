@@ -31,6 +31,29 @@ function ScrollToTop() {
   return null;
 }
 
+function CanonicalUrl() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    // Query filters, theme previews and fragments share the page's canonical.
+    const path = pathname.replace(/\/+$/, '') || '/';
+    const isPublic = /^\/(?:events|map|crawl|community|v\/[^/]+|events\/[^/]+)?$/.test(path);
+    let link = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+    if (!isPublic) {
+      link?.remove();
+      return;
+    }
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'canonical';
+      document.head.appendChild(link);
+    }
+    // Update the build-time tag as the SPA navigates, rather than retaining
+    // the first page's canonical on every subsequent page.
+    link.href = `https://nassaunights.com${path}`;
+  }, [pathname]);
+  return null;
+}
+
 const Fallback = () => (
   <div className="flex-1 flex items-center justify-center py-24">
     <Spinner className="w-8 h-8" />
@@ -41,6 +64,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <ScrollToTop />
+      <CanonicalUrl />
       <ThemeProvider>
       <AuthProvider>
       <FavoritesProvider>
