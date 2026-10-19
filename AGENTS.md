@@ -8,6 +8,7 @@ Guidance for AI coding agents (and humans) working in this repository. Read this
 
 - **Highlighted events**, ported from Island GO (`Limni/bahamas-exp`). Events are one-off (a date range) or **weekly/recurring** (weekly hours, optionally with no end date: "Ladies Night every Friday"), and live ones pulse on the map.
 - **Live radio** from a partner broadcaster (100 Jamz, Joy FM, Kiss FM, Y98 FM): an opt-in station picker and a mini-player that keeps playing across pages.
+- **Points**: members earn them for checking in at spots (once per spot per night, after a 4-minute stay) and for suggestions an admin applies; redeeming them at opted-in bars is designed in `docs/rewards.md`.
 - **Live, GPS-based activity.** Visitors who opt in send anonymous presence pings. The database turns them into "how busy is it now" per venue, compared with that venue's usual for the weekday and hour (8-week average), plus 30-day popularity. It updates in real time over Supabase Realtime.
 
 Everything else is Nassau Eats: directory, map, venue pages with drinks menus/photos/reviews, member accounts, community suggestions and the phone-friendly admin console. On top, admins can make members **venue managers** who update their own venues from `/manage`, and **editors** who add and edit any spot in the admin console (and nothing else).
@@ -66,6 +67,8 @@ src/
     auth.tsx               AuthProvider/useAuth — member accounts (session, profile, isAdmin)
     directory.tsx          DirectoryProvider (venues, upcoming events, tags, ratings) + LocationProvider
     favorites.tsx          FavoritesProvider/useFavorites: the member's favourite spot ids, toggle, signed-out prompt
+    points.ts              points settings (usePointsConfig), checkIn() (one GPS fix → check_in RPC), nassauNight(),
+                           useTonightsCheckIn, useMyPoints (balance + history)
     radio.tsx              RadioProvider/useRadio: radio settings + stations, playback (one stream), now-playing
                            parser/poller, Media Session, GA events; attachStream() (hls.js on demand)
     activity.tsx           ActivityProvider/useActivity: consent, nightly device id, presence pings,
@@ -101,6 +104,7 @@ src/
     Reviews.tsx            ReviewsSection (summary, own review form, list)
     Lightbox.tsx           full-screen photo/video viewer
     Media.tsx              MediaStill (photo, or video poster + play badge), VideoBadge, toLightbox
+    CheckIn.tsx            CheckInCard on the venue page (start → 4-minute stay → auto/tap Finish → points)
     Radio.tsx              RadioButton ("Live radio"), RadioSheet (station picker), RadioDock (mini-player),
                            StationLogo, EqBars
     FavoriteButton.tsx     heart that saves a spot to favourites (overlay / hero / tile variants)
@@ -139,6 +143,7 @@ src/
     ReviewsModeration.tsx  hide/unhide/delete member reviews
     TagsManager.tsx        manage category/vibe/area vocabularies
     ThemeSettings.tsx      pick the public site theme
+    PointsAdmin.tsx        /admin/points: amounts + on/off, top members (adjust with a note), latest awards
     RadioAdmin.tsx         /admin/radio: player switch, partner credit, stations (test stream / now playing, logo, order)
     UsersAdmin.tsx         member accounts: search, admin access, suspend, confirm, reset, delete
 supabase/
@@ -146,7 +151,7 @@ supabase/
   seed_demo.sql            optional fictional venues ("demo-*"), events ("Demo ·") and 8 weeks
                            of crowd history + a live crowd
   functions/invite-member/ Edge Function (Deno): admin-only invites (generateLink + our own styled email)
-docs/                      design notes for unbuilt/partly built features (bar crawl phases 2–3, day site, domains/SEO)
+docs/                      design notes for unbuilt/partly built features (bar crawl phases 2–3, rewards, day site, domains/SEO)
 scripts/
   seed-google.ts           Google Places importer (Node, service-role key)
   sitemap.mjs              runs after `vite build`: dist/sitemap.xml + robots.txt from published venues/events
@@ -168,9 +173,9 @@ README.md, DEPLOY.md       human docs
 | `/events/:id` | EventPage | also loads past events and (for admins) drafts |
 | `/crawl` | CrawlPage | `?night=YYYY-MM-DD&from=&to=` (minutes after the night's midnight, past 1440 = next morning), `party`, `area`*, `vibe`*, `price`, `n` (stops), `mode=walk\|mix\|taxi`, `first=<venue id>`, `seed`, `pick=1` (hand-picked), `stops=<ids>` (reopens exactly these stops in this order; someone else's link opens as "shared with you"). "Start near me" is never in the URL |
 | `/community` | Community | `?kind=new_spot\|update\|closed\|event\|other&venue=<id>&field=menu\|photos\|hours\|phone` pre-fills the form |
-| `/account` | Account | `?mode=signup`, `?next=/path` (in-app paths only; validated by `safeNext`); `#activity` is the sharing switch |
+| `/account` | Account | `?mode=signup`, `?next=/path` (in-app paths only; validated by `safeNext`); `#activity` is the sharing switch; `#points` scrolls to My points |
 | `/manage/*` | ManagerApp | `/manage` (My venues), `/manage/v/:id` (own venues only; `#menu` etc. scroll to a panel), `/manage/events`, `/manage/events/new?venue=`, `/manage/events/:id`. Signed out → `/account?next=/manage` |
-| `/admin/*` | AdminApp | Editors get only `/admin`, `/admin/new`, `/admin/v/:id` (anything else redirects to `/admin`). Admins: `/admin`, `/admin/new`, `/admin/v/:id`, `/admin/events`, `/admin/events/new?venue=&notes=`, `/admin/events/:id`, `/admin/inbox`, `/admin/activity`, `/admin/reviews`, `/admin/users`, `/admin/tags`, `/admin/theme`, `/admin/radio` |
+| `/admin/*` | AdminApp | Editors get only `/admin`, `/admin/new`, `/admin/v/:id` (anything else redirects to `/admin`). Admins: `/admin`, `/admin/new`, `/admin/v/:id`, `/admin/events`, `/admin/events/new?venue=&notes=`, `/admin/events/:id`, `/admin/inbox`, `/admin/activity`, `/admin/reviews`, `/admin/users`, `/admin/tags`, `/admin/theme`, `/admin/radio`, `/admin/points` |
 | `*` | → `/` | |
 
 Public pages render inside `<Layout/>` (5 tabs: Explore, Map, Events, Community, Account). `/admin` does not; it has its own light shell. The admin console is reachable **only by URL**, except an "Admin console" button on `/account` for admins. `/manage` has its own light shell too, linked from a **Venue manager** card on `/account` for members who manage a venue.
@@ -222,10 +227,12 @@ Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > Fav
 | `venue_favorites` | members' favourite spots | `(venue_id, user_id)` PK, `user_id` default `auth.uid()` → `profiles`, `created_at`. Cascades with the venue and the member. Totals only via `venue_favorite_counts()` |
 | `menu_item_likes` | likes on menu items | `(item_id, user_id)` PK (one like per member per item), `user_id` default `auth.uid()` → `profiles`, `created_at`. Cascades with the item and the member |
 | `tags` | filter vocabularies | `kind 'category'\|'vibe'\|'area'`, `label`, `sort`; unique `(kind,label)`; seeded with starter values |
-| `submissions` | community suggestions | `kind 'new_spot'\|'update'\|'closed'\|'event'\|'other'`, `venue_id`, `venue_name`, `fields text[]`, `message`, `contact_name`, `contact_email`, `credit_ok`, `photo_paths text[]` (≤6), `status 'new'\|'reviewing'\|'done'\|'dismissed'`, `admin_note` (private), `resolved_at` (trigger-set), `user_id` (default `auth.uid()`, null for anonymous) |
+| `submissions` | community suggestions | `kind 'new_spot'\|'update'\|'closed'\|'event'\|'other'`, `venue_id`, `venue_name`, `fields text[]`, `message`, `contact_name`, `contact_email`, `credit_ok`, `photo_paths text[]` (≤6), `status 'new'\|'reviewing'\|'done'\|'dismissed'`, `admin_note` (private), `points` (0–50 chosen when applying; null = the kind's default), `resolved_at` (trigger-set), `user_id` (default `auth.uid()`, null for anonymous) |
 | `profiles` | public member profile | `id` → `auth.users`, `display_name` (1–40 chars). Created by the `on_auth_user_created` trigger from sign-up metadata `display_name`. Existing users are backfilled |
-| `site_settings` | one row (`id = true`) of site-wide settings | `theme` (theme id, default `'neon'`; format-checked only, so new themes need no migration), **`radio_enabled`** (default false), `radio_partner` (≤ 80, "Presented by"), `radio_partner_url`, `updated_at`. In the Realtime publication |
+| `site_settings` | one row (`id = true`) of site-wide settings | `theme` (theme id, default `'neon'`; format-checked only, so new themes need no migration), **`radio_enabled`** (default false), `radio_partner` (≤ 80, "Presented by"), `radio_partner_url`, **points**: `points_enabled` (default true), `points_check_in` (1), `points_check_in_max` (5 spots a night), `points_update` (5), `points_new_spot` (10), `updated_at`. In the Realtime publication |
 | `radio_stations` | the partner's radio stations | `slug` (unique, stable: analytics + "last station"), `name`, `frequency`, `tagline` (genre line), `stream_url` / `backup_url` / `meta_url` (**https only**, checked), `website`, `logo_url`/`logo_path` (`venue-media` `radio/<id>/…`), `color` (`#rrggbb`), `sort`, `is_enabled`. Seeded with 100 Jamz, Joy FM, Kiss FM and Y98 FM (no stream URLs) |
+| `check_ins` | a member's check-in at a spot | `user_id` → `profiles`, `venue_id` (both cascade), `night` (Nassau date, 6 AM–6 AM: `points_night()`), `started_at`, `confirmed_at` (after the 4-minute stay), `points`; unique `(user_id, venue_id, night)`. **No coordinates** |
+| `points_ledger` | every points change | `user_id` → `profiles` (cascade), `points` (≠ 0; negative for adjustments/redemptions), `reason 'check_in'\|'update'\|'adjust'\|'redeem'`, `venue_id`, `check_in_id` / `submission_id` (unique, `on delete set null`: earned points outlive a deleted spot or suggestion), `note` (shown to the member), `created_by`. A balance is `sum(points)` |
 | `events` | highlighted nights | `title`, `description`, `venue_id` (nullable, `on delete set null`), own `lat`/`lng`/`address` (else the venue's pin is used), `start_date`, `end_date` (check end ≥ start; **null = repeats until further notice**), `hours jsonb` (weekly windows; set = a weekly event), `image_url`/`image_path` (**derived** from `event_media`, see below; don't write them from the app), `price_note ≤80`, `ticket_url`, `is_published`, `is_featured`, timestamps. In Realtime |
 | `presence` | **one row per device** currently at a venue | `device_id` PK, `venue_id`, `arrived_at`, `last_seen`, `counted_hour`. **No RLS policies: nobody can read it**; only the security-definer functions touch it. Never stores coordinates |
 | `venue_hourly` | hourly tallies | `(venue_id, hour_start)` PK, `visitors` (distinct phones that hour), `arrivals` (visits that started). Admin read only. Trimmed after 180 days |
@@ -245,7 +252,8 @@ Provider order in `App.tsx`: `BrowserRouter > ThemeProvider > AuthProvider > Fav
 | `tags` | everyone | admins |
 | `site_settings` | everyone | admins update (no insert/delete; the row is seeded) |
 | `radio_stations` | enabled stations **with a stream URL** for anyone; all for admins | admins |
-| `submissions` | admins | **anyone can insert**, but only as `status='new'` with no `admin_note`/`resolved_at` and `user_id` null or self; admins update/delete |
+| `check_ins`, `points_ledger` | own rows (+ admins); venue managers see nothing | nobody directly: only `check_in()`, the `submissions_points` trigger and `admin_adjust_points()` (security definer) |
+| `submissions` | admins | **anyone can insert**, but only as `status='new'` with no `admin_note`/`resolved_at`/`points` and `user_id` null or self; admins update/delete |
 | `profiles` | everyone (only `display_name` exists) | the owner updates their own (not while suspended); admins update any |
 | `events` | published for anyone; everything for admins; managers also see their venues' drafts | admins; managers insert/update/delete events whose `venue_id` is one of their venues (they can't move one elsewhere or create one without a venue) |
 | `event_media` | media of published events for anyone; all for admins; managers their venues' events (drafts too) | admins; managers of the event's venue |
@@ -276,6 +284,11 @@ Only admins may change `reviews.is_hidden`. The `reviews_guard` trigger forces `
 - **Favourites:** `venue_favorite_counts()` (security definer) → `venue_id, favorites`: every spot for admins, the caller's managed spots for managers, nothing for others. Execute revoked from `public`/`anon`. Never returns who favourited.
 - **Venue managers:** `is_venue_manager(p_venue)`, `can_manage_media(p_name)` (storage policies), `is_restricted_writer()` (an `anon`/`authenticated` caller who isn't an admin; the guard triggers use it, so security-definer functions, the service role and the SQL editor pass), and `admin_venue_managers(p_venue)` → `user_id, email, display_name, created_at` (admins only). `admin_list_users` also returns `venue_count` and takes `p_filter = 'managers'`.
 - **Edge Function `invite-member`** (`supabase/functions/invite-member/index.ts`, deployed by the owner; "Verify JWT" on). Body `{ email, display_name?, make_admin?, redirect_to? }`. It checks `is_admin()` **with the caller's token**, then uses the service-role key (only ever inside the function) for `auth.admin.generateLink({ type: 'invite' })`: that creates the account and the one-time accept link **without Supabase sending anything**. Supabase's own invite email isn't used because the free plan can't edit templates (and its mailer only reaches the project team). User metadata: `display_name` (→ the profile via `handle_new_user`) and `invited_by` (the inviter's display name). `make_admin` also inserts into `admins`. If secrets `RESEND_API_KEY` + `INVITE_FROM` are set it emails our styled invitation (`inviteEmail()` in the same file: inline styles + tables, HTML-escaped names, plain-text part) via the Resend API → `{ user_id, emailed: true }`; otherwise, or if sending fails, `{ user_id, emailed: false, link, warning? }` and the admin shares the link. 403 non-admin, 400 bad email, 409 already registered; re-inviting someone who hasn't accepted makes a fresh link.
+- **Points** (security definer):
+  - `check_in(p_venue, p_lat, p_lng, p_accuracy)` → jsonb `{status, …}` (authenticated only): `signed_out` / `suspended` / `disabled` / `unknown` (not a published spot with a pin) / `inaccurate` (accuracy > 100 m) / `too_far` (`distance_m`; geofence = `radius_m` + ≤ 30 m slack, as in `report_presence`) / `nightly_limit` (`max`) / `started` (`wait_s`) / `wait` / `confirmed` (`points`, `balance`) / `already`. The first call starts tonight's row; a call ≥ **4 minutes** later (the same DWELL as activity; `CHECK_IN_DWELL_S` in `lib/points.ts`) inside the geofence confirms it and writes the ledger row. A start older than 4 h restarts. Never stores the fix.
+  - `my_points()` → `balance, earned, check_ins, updates` for the caller.
+  - Trigger `submissions_points` (after insert/update, only when status/points/user change): `done` + a member → upsert the `update` ledger row with `coalesce(points, kind default)`; anything else deletes it. Does nothing while points are off.
+  - `admin_adjust_points(p_user, p_points, p_note)` (±1–1000, returns the new balance) and `admin_points_leaders(p_limit)` (admins only).
 - **Activity** (all security definer):
   - `report_presence(p_device uuid, p_lat, p_lng, p_accuracy)` → venue id or null. Granted to anon/authenticated. Rate-limited to one ping per device per 45 s. Accuracy ≤ 100 m: nearest published venue whose `radius_m` (+ ≤ 30 m GPS slack) contains the fix (bounding-box prefilter). Accuracy > 100 m: keeps the device at its current venue if the fix still covers it, else changes nothing. Not at a venue → the device's row is deleted. A visit counts after **DWELL = 4 min**; it stops counting **STALE = 15 min** after the last ping; each counted visit adds 1 visitor per hour (and 1 arrival per visit) to `venue_hourly`. Runs `activity_housekeeping()` on ~2% of pings.
   - `venue_activity()` → `venue_id, live_count, typical_now, peak_avg, visits_30d` for published venues with any activity. Lazily rebuilds averages (`activity_refresh_stats()`) at most hourly under an advisory lock. Live counts under 2 are reported as 0.
@@ -346,6 +359,13 @@ Phase 1 of [docs/bar-crawl.md](docs/bar-crawl.md) (read it before extending this
 - **Preview:** `?radio=preview` (Admin → Radio → **Preview on the site**, `initRadioPreview()` in `main.tsx`, `sessionStorage` `radio:preview`) shows the player in that tab even while it's off, with every enabled station the viewer can read: all of them for admins (RLS), so stations without a stream appear, marked "Preview · no stream yet". A "Previewing the radio player ×" pill ends it. Previews never write the `radio:v1` cache or send GA events. Visitors trying the URL only see ready stations.
 - **Admin** (`/admin/radio`, admins only): master switch (saves at once) + partner name/link; station list with status (Ready / Needs stream URL / Off), reorder, and a form per station with **Test** (plays the stream in the console), **Check** (reads now playing), logo upload (512 px, `radio/<id>/`), brand colour, Enabled, delete.
 - The station's brand colour appears only on its logo frame and its tile's selected edge; everything else follows the site theme.
+
+### Points (`lib/points.ts`, `components/CheckIn.tsx`, `admin/PointsAdmin.tsx`; redemption design in `docs/rewards.md`)
+- **Check in** card under the venue title card (published spots with a pin, points on). Signed out: "Check in and earn 1 point" + Sign in (`next=` back). Hidden when the visitor's location is already known and they're > 1.5 km away. Tap → one fresh high-accuracy fix → `check_in()` → "Checking you in…" with the time the point arrives; after 4 minutes it confirms automatically while the page is open (re-checked every second, so returning to the tab works), otherwise **Finish**. Then "+1 point! You're checked in" / later "Checked in tonight". Friendly copy for too far (distance), imprecise GPS, the nightly limit, blocked location, suspended.
+- **My points** on `/account` (`#points`): balance, how to earn (amounts from settings), the last 15 ledger rows, and the privacy line. Community's form says what an applied suggestion earns.
+- **Inbox:** a member's suggestion shows **Points when done** chips (0, 3, 5, 10, 15 + the default); Done saves the choice; on a Done suggestion a chip re-prices the award at once. Anonymous ones say they earn nothing.
+- **`/admin/points`:** on/off (off hides Check in and points everywhere and pauses awards; balances stay), amounts, top 50 members with **Adjust** (signed amount + note), latest 30 entries.
+- Check-ins are personal data tied to the account, unlike `presence`: only the member and admins read them, managers get nothing, and the copy says so. Keep presence and check-ins separate (never join them).
 
 ### Favourites (`lib/favorites.tsx`, `components/FavoriteButton.tsx`)
 - A heart on every spot card (`VenueCard` photo corner, `VenueRow` right edge; a sibling of the card's link, never inside it), beside Share on the venue page hero (published spots only), and a **Save** tile in the map drawer.
@@ -546,6 +566,7 @@ The full runbook is in **`DEPLOY.md`**. The essentials:
 - **Bundle split:** the admin code and Leaflet pages are `lazy()`. Don't import `src/admin/*` from public pages. Vendor chunks (react, supabase, leaflet, motion) are split in `vite.config.ts`.
 - **Security:** keep all authorization in RLS and security-definer RPCs. Never trust the client for `is_hidden`, `status`, `admin_note`, or `user_id`. Public RPCs must never expose emails or `admin_note`.
 - **Shared editors:** anything under `src/admin/` that `/manage` also renders (VenueEditor, EventEditor, EventsList, TagPicker, PhotoManager, MenuEditor…) must build links from `useConsole().base` and hide admin-only controls when `role === 'manager'` (and featured/delete/managers/events when `role === 'editor'`). A new admin-only column needs adding to the guard trigger too.
+- **Points:** award points only from security-definer SQL (`check_in()`, the submissions trigger, admin RPCs), never from the client, and record every change as a `points_ledger` row (no balance column to edit). Check-ins never store coordinates and are never linked to `presence`.
 - **Activity privacy:** never store coordinates, never expose `presence` or per-device data, keep the < 2 floor in every read path, and keep the device id anonymous (not the auth user id). New activity reads go through aggregate tables or security-definer functions.
 - **Comments in code** explain *why* (constraints, gotchas), matching the existing style. Keep it that way.
 
@@ -568,6 +589,7 @@ There are no tests. A practical loop:
 - **Not yet verified end to end:** against a real Supabase project (Realtime delivery of `venue_live`, Storage uploads of flyers), and the Docker image on the server.
 - **Limits of live activity:** counts only people who opted in while the site is open (no background tracking on the web); anyone can call `report_presence` with invented coordinates (rate limits and dwell blunt it, but levels are indicative, not audited); events with their own location have no activity geofence.
 - **Radio:** the seeded stations have no stream URLs. The stations' public web players use session-tokened stream addresses (e.g. 100 Jamz's securenetsystems URL returns 403 without one), so the broadcaster must supply direct HTTPS stream URLs (and now-playing feeds) before the player is switched on.
+- **Points:** earning is built; rewards/redemption at opted-in bars is designed in `docs/rewards.md` (rewards + redemptions tables, held points, staff PIN or manager confirmation, expiry refunds). Check-in GPS can be spoofed like presence; the 4-minute stay blunts drive-bys, and in-person staff confirmation is meant to protect redemptions.
 - **Not built:**
   - OAuth logins (Google/Apple);
   - review photos, replies, likes, and review reporting by visitors;

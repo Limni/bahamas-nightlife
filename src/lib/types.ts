@@ -116,6 +116,10 @@ export interface Submission {
   admin_note: string | null;
   resolved_at: string | null;
   created_at: string;
+  /** The member who sent it (null = anonymous). */
+  user_id?: string | null;
+  /** Points chosen when applying it; null = the default for its kind. */
+  points?: number | null;
 }
 
 export const SUBMISSION_KIND_LABELS: Record<SubmissionKind, string> = {

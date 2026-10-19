@@ -8,6 +8,7 @@ import { uploadSubmissionPhoto } from '@/lib/images';
 import type { SubmissionKind } from '@/lib/types';
 import { Chip } from '@/components/ui';
 import { SetupNotice } from '@/components/SetupNotice';
+import { pointsLabel, usePointsConfig } from '@/lib/points';
 
 const KINDS: { key: SubmissionKind; label: string; hint: string }[] = [
   { key: 'new_spot', label: 'Suggest a spot', hint: 'A place you want to see listed' },
@@ -121,6 +122,13 @@ function VenuePicker({ value, onChange }: { value: string | null; onChange: (id:
 
 export default function Community() {
   const { session, profile } = useAuth();
+  const points = usePointsConfig();
+  // "5 points" or "5–10 points": what an applied suggestion earns a signed-in member.
+  const reward = points?.enabled
+    ? points.update === points.newSpot
+      ? pointsLabel(points.update)
+      : `${Math.min(points.update, points.newSpot)}–${pointsLabel(Math.max(points.update, points.newSpot))}`
+    : null;
   const [params] = useSearchParams();
   const initialKind = (KINDS.find((k) => k.key === params.get('kind'))?.key ?? 'new_spot') as SubmissionKind;
   const initialField = FIELD_PARAM[params.get('field') ?? ''];
@@ -373,6 +381,7 @@ export default function Community() {
                   <span>
                     Sending as <b>{profile?.display_name ?? session.user.email}</b>. Follow its status in{' '}
                     <Link to="/account" className="font-extrabold text-brand-300 underline">your account</Link>.
+                    {reward && <> You’ll earn {reward} if we apply it.</>}
                   </span>
                 </div>
               ) : (
@@ -402,7 +411,8 @@ export default function Community() {
               )}
               {!session && (
                 <p className="text-xs font-semibold text-night-300 -mt-3">
-                  <Link to="/account?next=/community" className="font-extrabold text-brand-300 underline">Sign in</Link> to follow the status of your suggestions.
+                  <Link to="/account?next=/community" className="font-extrabold text-brand-300 underline">Sign in</Link> to follow the status of your suggestions
+                  {reward ? ` and earn ${reward} when we apply one` : ''}.
                 </p>
               )}
               {/* Honeypot: hidden from people, irresistible to bots. */}

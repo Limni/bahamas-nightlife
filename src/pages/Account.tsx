@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, Heart, ChevronRight, Clock, KeyRound, Loader2, LogOut, MailCheck, MessageSquarePlus, PartyPopper, Pencil, Shield, Star, Store, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Coins, Gift, Heart, MapPinCheck, SlidersHorizontal, ChevronRight, Clock, KeyRound, Loader2, LogOut, MailCheck, MessageSquarePlus, PartyPopper, Pencil, Shield, Star, Store, XCircle } from 'lucide-react';
 import { authLinkError, supabase, supabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
 import { SUBMISSION_KIND_LABELS, type SubmissionKind, type SubmissionStatus } from '@/lib/types';
@@ -11,6 +11,7 @@ import { VenueRow } from '@/components/VenueCard';
 import { useFavorites } from '@/lib/favorites';
 import { useDirectory } from '@/lib/directory';
 import { useNow } from '@/lib/useNow';
+import { pointsLabel, useMyPoints, usePointsConfig, type LedgerRow } from '@/lib/points';
 
 const input =
   'w-full px-4 py-3 rounded-2xl border border-white/10 bg-night-950/70 outline-none focus:border-brand-400 font-semibold text-white placeholder:text-night-500';
@@ -378,6 +379,8 @@ function SignedIn() {
         </section>
       )}
 
+      <MyPointsSection userId={session?.user.id} />
+
       <MyFavorites />
 
       <section className="bg-night-900 rounded-[1.75rem] border border-white/10 p-5 md:p-6">
@@ -515,6 +518,103 @@ function MyFavorites() {
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+const REASON: Record<LedgerRow['reason'], { label: string; icon: typeof Coins }> = {
+  check_in: { label: 'Checked in', icon: MapPinCheck },
+  update: { label: 'Suggestion applied', icon: MessageSquarePlus },
+  adjust: { label: 'Adjustment', icon: SlidersHorizontal },
+  redeem: { label: 'Reward redeemed', icon: Gift },
+};
+
+/** Balance, how to earn, and the latest entries. Hidden until the points schema exists and points are on. */
+function MyPointsSection({ userId }: { userId: string | undefined }) {
+  const config = usePointsConfig();
+  const { summary, history, available } = useMyPoints(userId);
+
+  // /account#points (from a venue's "See your points") scrolls here once it renders.
+  const shown = !!config?.enabled && available === true;
+  useEffect(() => {
+    if (shown && window.location.hash === '#points') document.getElementById('points')?.scrollIntoView({ block: 'start' });
+  }, [shown]);
+
+  if (!shown || !summary) return null;
+  return (
+    <section id="points" className="scroll-mt-20 bg-night-900 rounded-[1.75rem] border border-amber-400/25 p-5 md:p-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 font-display text-xl font-bold text-white">
+            <Coins className="w-5 h-5 text-amber-300" /> My points
+          </h2>
+          <p className="mt-1 text-sm font-semibold text-night-300">Rewards at participating bars are coming soon.</p>
+        </div>
+        <p className="text-right">
+          <span className="block font-display text-4xl font-extrabold text-amber-300 leading-none">{summary.balance}</span>
+          <span className="text-xs font-extrabold uppercase tracking-wider text-night-300">points</span>
+        </p>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div className="flex items-start gap-2.5 p-3 rounded-2xl bg-white/5 border border-white/10">
+          <MapPinCheck className="w-5 h-5 text-glow-300 shrink-0" />
+          <p className="text-sm font-semibold text-night-200">
+            <b className="text-white">{pointsLabel(config.checkIn)}</b> for checking in at a spot, once per spot per night (up to {config.checkInMax} a night).
+            Find <b className="text-white">Check in</b> on the spot’s page while you’re there.
+          </p>
+        </div>
+        <div className="flex items-start gap-2.5 p-3 rounded-2xl bg-white/5 border border-white/10">
+          <MessageSquarePlus className="w-5 h-5 text-brand-300 shrink-0" />
+          <p className="text-sm font-semibold text-night-200">
+            <b className="text-white">
+              {config.update === config.newSpot ? pointsLabel(config.update) : `${Math.min(config.update, config.newSpot)}–${pointsLabel(Math.max(config.update, config.newSpot))}`}
+            </b>{' '}
+            when we apply a suggestion you send while signed in.{' '}
+            <Link to="/community" className="text-brand-300 hover:text-brand-200 underline underline-offset-2">
+              Suggest an update
+            </Link>
+          </p>
+        </div>
+      </div>
+
+      {history.length > 0 ? (
+        <ul className="mt-4 divide-y divide-white/5">
+          {history.map((h) => {
+            const { label, icon: Icon } = REASON[h.reason];
+            return (
+              <li key={h.id} className="flex items-center gap-3 py-2.5">
+                <Icon className="w-4 h-4 text-night-300 shrink-0" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-bold text-white truncate">
+                    {label}
+                    {h.venues && (
+                      <>
+                        {' · '}
+                        <Link to={`/v/${h.venues.slug}`} className="hover:text-brand-200">
+                          {h.venues.name}
+                        </Link>
+                      </>
+                    )}
+                  </span>
+                  <span className="block text-xs font-semibold text-night-400 truncate">
+                    {new Date(h.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                    {h.note ? ` · ${h.note}` : ''}
+                  </span>
+                </span>
+                <span className={`shrink-0 font-extrabold ${h.points > 0 ? 'text-amber-300' : 'text-night-300'}`}>
+                  {h.points > 0 ? `+${h.points}` : h.points}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="mt-4 text-sm font-semibold text-night-300">No points yet. Your first check-in is the easiest one.</p>
+      )}
+      <p className="mt-3 text-xs font-semibold text-night-400">
+        Your check-ins and points are visible only to you and the Nassau Nights team.
+      </p>
     </section>
   );
 }

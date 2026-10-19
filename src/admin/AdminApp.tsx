@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, Link } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
-import { Activity, CalendarHeart, ExternalLink, Inbox as InboxIcon, ListChecks, LogOut, Palette, Plus, Radio, Star, Tags, Martini, Users } from 'lucide-react';
+import { Activity, CalendarHeart, Coins, ExternalLink, Inbox as InboxIcon, ListChecks, LogOut, Palette, Plus, Radio, Star, Tags, Martini, Users } from 'lucide-react';
 import { supabase, supabaseConfigured } from '@/lib/supabase';
 import { SetupNotice } from '@/components/SetupNotice';
 import { Spinner } from '@/components/ui';
@@ -14,6 +14,7 @@ import TagsManager from './TagsManager';
 import ReviewsModeration from './ReviewsModeration';
 import ThemeSettings from './ThemeSettings';
 import RadioAdmin from './RadioAdmin';
+import PointsAdmin from './PointsAdmin';
 import EventsList from './EventsList';
 import EventEditor from './EventEditor';
 import ActivityAdmin from './ActivityAdmin';
@@ -91,6 +92,7 @@ const NAV = [
   { to: '/admin/activity', label: 'Activity', icon: Activity, end: false, phone: true },
   { to: '/admin/reviews', label: 'Reviews', icon: Star, end: false, phone: false },
   { to: '/admin/users', label: 'Members', icon: Users, end: false, phone: false },
+  { to: '/admin/points', label: 'Points', icon: Coins, end: false, phone: false },
   { to: '/admin/tags', label: 'Tags', icon: Tags, end: false, phone: false },
   { to: '/admin/theme', label: 'Theme', icon: Palette, end: false, phone: false },
   { to: '/admin/radio', label: 'Radio', icon: Radio, end: false, phone: false },
@@ -135,11 +137,13 @@ function Shell({ session, role }: { session: Session; role: 'admin' | 'editor' }
                 key={to}
                 to={to}
                 end={end}
+                title={label}
                 className={({ isActive }) =>
                   `relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-bold whitespace-nowrap ${isActive ? 'bg-white/15 text-white' : 'text-slate-300 hover:text-white'}`
                 }
               >
-                <Icon className="w-4 h-4" /> {label}
+                {/* Eleven sections don't fit as words below xl; icons (with tooltips) do. */}
+                <Icon className="w-4 h-4" /> <span className={nav.length > 6 ? 'hidden xl:inline' : ''}>{label}</span>
                 {to === '/admin/inbox' && inboxCount > 0 && (
                   <span className="ml-0.5 px-1.5 rounded-full bg-amber-400 text-amber-950 text-[11px] font-black">{inboxCount}</span>
                 )}
@@ -185,6 +189,7 @@ function Shell({ session, role }: { session: Session; role: 'admin' | 'editor' }
           <Route path="tags" element={<TagsManager />} />
           <Route path="theme" element={<ThemeSettings />} />
           <Route path="radio" element={<RadioAdmin />} />
+          <Route path="points" element={<PointsAdmin />} />
           <Route path="events" element={<EventsList />} />
           <Route path="events/:id" element={<EventEditor />} />
           <Route path="activity" element={<ActivityAdmin />} />

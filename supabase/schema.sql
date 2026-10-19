@@ -1932,3 +1932,291 @@ insert into public.radio_stations (slug, name, frequency, tagline, color, websit
   ('kiss-fm',  'Kiss FM',  '96.1 FM',  'Adult contemporary hits',               '#ef4444', null, 3),
   ('y98-fm',   'Y98 FM',   '98.7 FM',  'Hot adult contemporary',                '#3b82f6', null, 4)
 on conflict (slug) do nothing;
+
+-- =============================================================================
+-- Points. Members earn points for checking in at a spot (once per spot per
+-- night, after staying a few minutes) and for suggestions an admin applies.
+-- Every change is a row in points_ledger, so a balance is a sum and future
+-- reward redemptions at opted-in bars are negative rows (see docs/rewards.md).
+--
+-- Check-ins are separate from the anonymous live activity: a member taps
+-- "Check in", the browser sends one GPS fix, and check_in() compares it with
+-- the venue's geofence. Coordinates are never stored. Check-ins are linked to
+-- the account (that's the point of them), and only the member and admins can
+-- read them; presence and its device ids stay untouched and anonymous.
+-- =============================================================================
+alter table public.site_settings add column if not exists points_enabled boolean not null default true;
+alter table public.site_settings add column if not exists points_check_in int not null default 1 check (points_check_in between 0 and 20);
+alter table public.site_settings add column if not exists points_check_in_max int not null default 5 check (points_check_in_max between 1 and 20);  -- spots per night
+alter table public.site_settings add column if not exists points_update int not null default 5 check (points_update between 0 and 50);
+alter table public.site_settings add column if not exists points_new_spot int not null default 10 check (points_new_spot between 0 and 50);
+
+-- Points the admin chose when applying a suggestion; null = the default for its kind.
+alter table public.submissions add column if not exists points int check (points is null or points between 0 and 50);
+
+-- Replaces the policy above now that points exists: members can't award themselves.
+drop policy if exists "Anyone can submit suggestions" on public.submissions;
+create policy "Anyone can submit suggestions" on public.submissions
+  for insert to anon, authenticated
+  with check (
+    status = 'new' and admin_note is null and resolved_at is null and points is null
+    and (user_id is null or user_id = auth.uid())
+  );
+
+-- The Nassau "night" a moment belongs to: 6 AM to 6 AM, like the activity device id.
+create or replace function public.points_night(p_at timestamptz default now())
+returns date
+language sql
+stable
+as $$
+  select ((p_at at time zone 'America/Nassau') - interval '6 hours')::date;
+$$;
+
+create table if not exists public.check_ins (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid not null references public.profiles (id) on delete cascade,
+  venue_id     uuid not null references public.venues (id) on delete cascade,
+  night        date not null,
+  started_at   timestamptz not null default now(),
+  confirmed_at timestamptz,             -- set once they've stayed DWELL (4 min)
+  points       int not null default 0,
+  unique (user_id, venue_id, night)
+);
+
+create index if not exists check_ins_user_night_idx on public.check_ins (user_id, night);
+
+alter table public.check_ins enable row level security;
+
+drop policy if exists "Members read their check-ins" on public.check_ins;
+create policy "Members read their check-ins" on public.check_ins
+  for select using (user_id = auth.uid() or public.is_admin());
+-- No write policies: only check_in() (security definer) writes.
+
+create table if not exists public.points_ledger (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references public.profiles (id) on delete cascade,
+  points        int not null check (points <> 0 and points between -100000 and 1000),
+  reason        text not null check (reason in ('check_in', 'update', 'adjust', 'redeem')),
+  venue_id      uuid references public.venues (id) on delete set null,
+  -- Earned points outlive a deleted spot or suggestion, hence "set null".
+  check_in_id   uuid unique references public.check_ins (id) on delete set null,
+  submission_id uuid unique references public.submissions (id) on delete set null,
+  note          text check (note is null or char_length(note) <= 200),
+  created_by    uuid references auth.users (id) on delete set null,
+  created_at    timestamptz not null default now()
+);
+
+create index if not exists points_ledger_user_idx on public.points_ledger (user_id, created_at desc);
+
+alter table public.points_ledger enable row level security;
+
+drop policy if exists "Members read their points" on public.points_ledger;
+create policy "Members read their points" on public.points_ledger
+  for select using (user_id = auth.uid() or public.is_admin());
+-- No write policies: rows come from check_in(), the submissions trigger and admin_adjust_points().
+
+-- One call per tap. The first call at a spot tonight starts the check-in; a
+-- call DWELL (4 min) or more later, still inside the geofence, confirms it and
+-- awards the points. So a drive-by, or one spoofed fix, earns nothing.
+create or replace function public.check_in(p_venue uuid, p_lat float8, p_lng float8, p_accuracy float8)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid     uuid := auth.uid();
+  v_night   date := public.points_night();
+  v_set     record;
+  v_venue   record;
+  v_dist    float8;
+  v_ci      public.check_ins%rowtype;
+  v_count   int;
+  v_wait    int;
+  v_balance int;
+begin
+  if v_uid is null then
+    return jsonb_build_object('status', 'signed_out');
+  end if;
+  if public.is_suspended() then
+    return jsonb_build_object('status', 'suspended');
+  end if;
+  select points_enabled, points_check_in, points_check_in_max into v_set from public.site_settings where id;
+  if not coalesce(v_set.points_enabled, false) then
+    return jsonb_build_object('status', 'disabled');
+  end if;
+  select id, lat, lng, radius_m into v_venue
+  from public.venues
+  where id = p_venue and is_published and lat is not null and lng is not null;
+  if not found then
+    return jsonb_build_object('status', 'unknown');
+  end if;
+  if p_lat is null or p_lng is null or p_accuracy is null or p_accuracy > 100 then
+    return jsonb_build_object('status', 'inaccurate', 'accuracy_m', round(p_accuracy));
+  end if;
+  -- Same geofence as report_presence(): the spot's radius plus up to 30 m of GPS slack.
+  v_dist := public.haversine_m(p_lat, p_lng, v_venue.lat, v_venue.lng);
+  if v_dist > v_venue.radius_m + least(p_accuracy, 30) then
+    return jsonb_build_object('status', 'too_far', 'distance_m', round(v_dist));
+  end if;
+
+  select * into v_ci from public.check_ins
+  where user_id = v_uid and venue_id = p_venue and night = v_night
+  for update;
+
+  if not found then
+    select count(*) into v_count from public.check_ins where user_id = v_uid and night = v_night;
+    if v_count >= v_set.points_check_in_max then
+      return jsonb_build_object('status', 'nightly_limit', 'max', v_set.points_check_in_max);
+    end if;
+    insert into public.check_ins (user_id, venue_id, night)
+    values (v_uid, p_venue, v_night)
+    on conflict (user_id, venue_id, night) do nothing;
+    return jsonb_build_object('status', 'started', 'wait_s', 240, 'points', v_set.points_check_in);
+  end if;
+
+  if v_ci.confirmed_at is not null then
+    return jsonb_build_object('status', 'already', 'points', v_ci.points);
+  end if;
+  -- Started hours ago and never finished: start the clock again.
+  if v_ci.started_at < now() - interval '4 hours' then
+    update public.check_ins set started_at = now() where id = v_ci.id;
+    return jsonb_build_object('status', 'started', 'wait_s', 240, 'points', v_set.points_check_in);
+  end if;
+  v_wait := ceil(extract(epoch from (v_ci.started_at + interval '4 minutes' - now())));
+  if v_wait > 0 then
+    return jsonb_build_object('status', 'wait', 'wait_s', v_wait, 'points', v_set.points_check_in);
+  end if;
+
+  update public.check_ins set confirmed_at = now(), points = v_set.points_check_in where id = v_ci.id;
+  if v_set.points_check_in > 0 then
+    insert into public.points_ledger (user_id, points, reason, venue_id, check_in_id)
+    values (v_uid, v_set.points_check_in, 'check_in', p_venue, v_ci.id)
+    on conflict (check_in_id) do nothing;
+  end if;
+  select coalesce(sum(points), 0)::int into v_balance from public.points_ledger where user_id = v_uid;
+  return jsonb_build_object('status', 'confirmed', 'points', v_set.points_check_in, 'balance', v_balance);
+end;
+$$;
+
+revoke execute on function public.check_in(uuid, float8, float8, float8) from public, anon;
+grant execute on function public.check_in(uuid, float8, float8, float8) to authenticated;
+
+-- The signed-in member's totals.
+create or replace function public.my_points()
+returns table (balance int, earned int, check_ins int, updates int)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    coalesce(sum(points), 0)::int,
+    coalesce(sum(points) filter (where points > 0), 0)::int,
+    count(*) filter (where reason = 'check_in')::int,
+    count(*) filter (where reason = 'update')::int
+  from public.points_ledger
+  where user_id = auth.uid();
+$$;
+
+revoke execute on function public.my_points() from public, anon;
+grant execute on function public.my_points() to authenticated;
+
+-- Applying a member's suggestion awards points; un-applying takes them back.
+-- Runs only when the status, points or member change, so editing a note never
+-- re-prices an old award.
+create or replace function public.submissions_points()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_set record;
+  v_pts int;
+begin
+  if tg_op = 'UPDATE'
+     and new.status is not distinct from old.status
+     and new.points is not distinct from old.points
+     and new.user_id is not distinct from old.user_id then
+    return new;
+  end if;
+  if new.status <> 'done' or new.user_id is null then
+    delete from public.points_ledger where submission_id = new.id;
+    return new;
+  end if;
+  select points_enabled, points_update, points_new_spot into v_set from public.site_settings where id;
+  if not coalesce(v_set.points_enabled, false) then
+    return new;
+  end if;
+  v_pts := coalesce(new.points, case when new.kind = 'new_spot' then v_set.points_new_spot else v_set.points_update end);
+  if v_pts > 0 then
+    insert into public.points_ledger (user_id, points, reason, venue_id, submission_id, created_by)
+    values (new.user_id, v_pts, 'update', new.venue_id, new.id, auth.uid())
+    on conflict (submission_id) do update set points = excluded.points, user_id = excluded.user_id;
+  else
+    delete from public.points_ledger where submission_id = new.id;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists submissions_points on public.submissions;
+create trigger submissions_points
+  after insert or update on public.submissions
+  for each row execute function public.submissions_points();
+
+-- Admin corrections (positive or negative), with a note the member sees.
+create or replace function public.admin_adjust_points(p_user uuid, p_points int, p_note text default null)
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_balance int;
+begin
+  if not public.is_admin() then
+    raise exception 'Only admins can adjust points' using errcode = '42501';
+  end if;
+  if p_points is null or p_points = 0 or abs(p_points) > 1000 then
+    raise exception 'Adjust by 1 to 1000 points';
+  end if;
+  insert into public.points_ledger (user_id, points, reason, note, created_by)
+  values (p_user, p_points, 'adjust', nullif(left(trim(coalesce(p_note, '')), 200), ''), auth.uid());
+  select coalesce(sum(points), 0)::int into v_balance from public.points_ledger where user_id = p_user;
+  return v_balance;
+end;
+$$;
+
+revoke execute on function public.admin_adjust_points(uuid, int, text) from public, anon;
+grant execute on function public.admin_adjust_points(uuid, int, text) to authenticated;
+
+-- Admin overview: members by balance.
+create or replace function public.admin_points_leaders(p_limit int default 50)
+returns table (user_id uuid, display_name text, balance int, check_ins int, updates int, last_at timestamptz)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Only admins can see points' using errcode = '42501';
+  end if;
+  return query
+  select l.user_id, p.display_name,
+         sum(l.points)::int,
+         (count(*) filter (where l.reason = 'check_in'))::int,
+         (count(*) filter (where l.reason = 'update'))::int,
+         max(l.created_at)
+  from public.points_ledger l
+  join public.profiles p on p.id = l.user_id
+  group by l.user_id, p.display_name
+  order by sum(l.points) desc, max(l.created_at) desc
+  limit least(greatest(coalesce(p_limit, 50), 1), 200);
+end;
+$$;
+
+revoke execute on function public.admin_points_leaders(int) from public, anon;
+grant execute on function public.admin_points_leaders(int) to authenticated;

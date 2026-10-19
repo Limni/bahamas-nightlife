@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, Clock, ImagePlus, Inbox as InboxIcon, Mail, Martini, Plus, Trash2, UtensilsCrossed, XCircle } from 'lucide-react';
+import { CheckCircle2, Clock, Coins, ImagePlus, Inbox as InboxIcon, Mail, Martini, Plus, Trash2, UtensilsCrossed, XCircle } from 'lucide-react';
 import { supabase, SUBMISSION_BUCKET } from '@/lib/supabase';
 import { uploadMedia } from '@/lib/images';
 import { SUBMISSION_KIND_LABELS, type PhotoKind, type Submission, type SubmissionStatus } from '@/lib/types';
 import { Spinner } from '@/components/ui';
 import { Lightbox } from '@/components/Lightbox';
+import { usePointsConfig } from '@/lib/points';
 import { Button, useFeedback } from './ui';
 
 const KIND_LABEL: Record<PhotoKind, string> = { gallery: 'gallery', menu: 'drinks menu', food_menu: 'food menu' };
@@ -34,6 +35,15 @@ function SubmissionCard({ s, onChanged }: { s: Row; onChanged: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [viewer, setViewer] = useState<number | null>(null);
   const [imported, setImported] = useState<Record<string, PhotoKind>>({});
+  const points = usePointsConfig();
+  // Members (not anonymous senders) earn points when it's applied; the admin picks how many.
+  const canEarn = !!s.user_id && !!points?.enabled;
+  const defaultPts = points ? (s.kind === 'new_spot' ? points.newSpot : points.update) : 0;
+  const [pts, setPts] = useState<number>(s.points ?? defaultPts);
+  useEffect(() => {
+    setPts(s.points ?? defaultPts);
+  }, [s.points, defaultPts]);
+  const ptsChoices = [...new Set([0, 3, 5, 10, 15, defaultPts])].sort((a, b) => a - b);
 
   // Suggestion photos live in a private bucket — mint short-lived links to view them.
   useEffect(() => {
@@ -46,11 +56,30 @@ function SubmissionCard({ s, onChanged }: { s: Row; onChanged: () => void }) {
 
   const setStatus = async (status: SubmissionStatus) => {
     setBusy(status);
-    const { error } = await supabase.from('submissions').update({ status, admin_note: note.trim() || null }).eq('id', s.id);
+    const { error } = await supabase
+      .from('submissions')
+      .update({ status, admin_note: note.trim() || null, ...(canEarn && status === 'done' ? { points: pts } : {}) })
+      .eq('id', s.id);
     setBusy(null);
     if (error) return toast(error.message, 'error');
-    toast(status === 'done' ? 'Marked done — thanks credited on the community page' : 'Updated');
+    toast(
+      status === 'done'
+        ? canEarn && pts > 0
+          ? `Marked done: ${pts} point${pts === 1 ? '' : 's'} to ${s.contact_name || 'the sender'}`
+          : 'Marked done — thanks credited on the community page'
+        : 'Updated',
+    );
     window.dispatchEvent(new Event('inbox-changed'));
+    onChanged();
+  };
+
+  // On an applied suggestion, changing the points re-prices the award straight away (the trigger updates the ledger).
+  const choosePoints = async (n: number) => {
+    setPts(n);
+    if (s.status !== 'done') return;
+    const { error } = await supabase.from('submissions').update({ points: n }).eq('id', s.id);
+    if (error) return toast(error.message, 'error');
+    toast(n > 0 ? `Award changed to ${n} point${n === 1 ? '' : 's'}` : 'Points removed');
     onChanged();
   };
 
@@ -159,6 +188,32 @@ function SubmissionCard({ s, onChanged }: { s: Row; onChanged: () => void }) {
           )}
           {!s.credit_ok && <span className="text-xs text-slate-400">(prefers no public credit)</span>}
         </p>
+      )}
+
+      {points?.enabled && (
+        <div className="flex flex-wrap items-center gap-1.5 text-sm">
+          <Coins className="w-4 h-4 text-amber-600" />
+          {canEarn ? (
+            <>
+              <span className="font-bold text-slate-600 mr-1">{s.status === 'done' ? 'Points awarded:' : 'Points when done:'}</span>
+              {ptsChoices.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => choosePoints(n)}
+                  className={`min-w-9 px-2 py-1 rounded-lg text-xs font-extrabold border ${
+                    pts === n ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                  aria-pressed={pts === n}
+                >
+                  {n}
+                </button>
+              ))}
+            </>
+          ) : (
+            <span className="font-semibold text-slate-400">Sent without an account, so no points.</span>
+          )}
+        </div>
       )}
 
       <textarea
