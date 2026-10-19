@@ -15,7 +15,8 @@ import { supabaseConfigured } from '@/lib/supabase';
 import { RailCard, VenueCard, VenueRow } from '@/components/VenueCard';
 import { EventCard } from '@/components/EventCard';
 import { FilterSheet, SearchFilterBar } from '@/components/FilterSheet';
-import { Chip, EmptyState, HeatBadge } from '@/components/ui';
+import { EmptyState, HeatBadge } from '@/components/ui';
+import { MultiSelect } from '@/components/MultiSelect';
 import { SetupNotice } from '@/components/SetupNotice';
 import { Logo } from '@/components/Layout';
 import { RadioButton } from '@/components/Radio';
@@ -164,46 +165,6 @@ function ScrollRow({ children, className, arrowTop }: { children: ReactNode; cla
 }
 
 /** Desktop hero art: a live "board" of where it's busy, else tonight's events, else the scene's mix. */
-/** A labelled, single-line, sideways-scrolling row of toggle chips (selected ones first). */
-function TagChips({
-  label,
-  icon: Icon,
-  items,
-  selected,
-  onToggle,
-  iconFor,
-}: {
-  label: string;
-  icon: LucideIcon;
-  items: [string, number][];
-  selected: string[];
-  onToggle: (value: string) => void;
-  iconFor?: (value: string) => LucideIcon | undefined;
-}) {
-  if (!items.length) return null;
-  const ordered = [...items.filter(([v]) => selected.includes(v)), ...items.filter(([v]) => !selected.includes(v))];
-  return (
-    <div className="flex items-center gap-2 min-w-0">
-      <span className="shrink-0 inline-flex items-center gap-1 w-16 text-[11px] font-extrabold uppercase tracking-wider text-night-300">
-        <Icon className="w-3.5 h-3.5 text-brand-400" /> {label}
-      </span>
-      <div className="flex-1 min-w-0 flex gap-1.5 overflow-x-auto no-scrollbar py-0.5 [mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)] pr-6">
-        {ordered.map(([value, n]) => {
-          const on = selected.includes(value);
-          const VIcon = iconFor?.(value);
-          return (
-            <Chip key={value} size="sm" active={on} onClick={() => onToggle(value)}>
-              {VIcon && <VIcon className="w-3.5 h-3.5" />}
-              {value}
-              {n > 0 && <span className={`text-[10px] font-extrabold ${on ? 'text-white/80' : 'text-night-400'}`}>{n}</span>}
-            </Chip>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function LiveBoard({ venues, counts, now }: { venues: Venue[]; counts: [string, number][]; now: number }) {
   const { heatOf, activity } = useActivity();
   const { events } = useDirectory();
@@ -656,10 +617,27 @@ export default function Explore() {
       <section ref={resultsRef} className="mt-10 scroll-mt-4 md:scroll-mt-20">
         <SectionHeader eyebrow={browsing ? 'The full directory' : 'Your search'} title={browsing ? 'All spots' : 'Matching spots'} />
 
-        {/* Vibes and neighbourhoods as toggles (like the map): one scrolling line each, combinable with every other filter. */}
-        <div className="space-y-2 mb-3">
-          <TagChips label="Vibe" icon={Sparkles} items={vibes} selected={filters.vibes} onToggle={(v) => toggle('vibes', v)} iconFor={(v) => VIBE_ICONS[v]} />
-          <TagChips label="Area" icon={MapPin} items={areas} selected={filters.areas} onToggle={(a) => toggle('areas', a)} />
+        {/* Vibes and neighbourhoods as multi-selects: one line, a dropdown on desktop, a sheet on phones. */}
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <MultiSelect
+            label="Vibe"
+            icon={Sparkles}
+            options={vibes}
+            selected={filters.vibes}
+            onToggle={(v) => toggle('vibes', v)}
+            onClear={() => setFilters((f) => ({ ...f, vibes: [] }))}
+            resultCount={results.length}
+            iconFor={(v) => VIBE_ICONS[v]}
+          />
+          <MultiSelect
+            label="Area"
+            icon={MapPin}
+            options={areas}
+            selected={filters.areas}
+            onToggle={(a) => toggle('areas', a)}
+            onClear={() => setFilters((f) => ({ ...f, areas: [] }))}
+            resultCount={results.length}
+          />
         </div>
 
         <div className="sticky top-0 md:top-16 z-[1000] -mx-4 px-4 md:-mx-6 md:px-6 py-2.5 bg-night-950/90 backdrop-blur-md border-b border-white/10 mb-5">
