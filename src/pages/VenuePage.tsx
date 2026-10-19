@@ -400,7 +400,9 @@ export default function VenuePage() {
                       ))}
                     </ul>
                   ) : (
-                    <p className="text-sm font-semibold text-night-300">Hours haven’t been added yet.</p>
+                    <p className="text-sm font-semibold text-night-300">
+                      <span className="font-extrabold text-night-100">Hours TBA.</span> They haven’t been announced yet; call ahead to check.
+                    </p>
                   )}
                   {r.hours_note && <p className="mt-3 text-xs font-semibold text-night-300">{r.hours_note}</p>}
                 </Card>

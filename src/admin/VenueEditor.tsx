@@ -4,7 +4,7 @@ import { ArrowLeft, CalendarPlus, ExternalLink, Martini, Save, Trash2, UtensilsC
 import { supabase, MEDIA_BUCKET } from '@/lib/supabase';
 import { useDirectory } from '@/lib/directory';
 import { MENU_PHOTO_KIND, type MenuKind, type Photo, type Venue } from '@/lib/types';
-import type { WeeklyHours } from '@/lib/hours';
+import { hasHours, type WeeklyHours } from '@/lib/hours';
 import { Spinner } from '@/components/ui';
 import { Button, Field, inputClass, Panel, Toggle, useFeedback } from './ui';
 import { LocationField, type LatLng } from './LocationField';
@@ -370,6 +370,9 @@ export default function VenueEditor() {
       <Panel title="Hours" id="hours">
         <div className="space-y-4">
           <HoursEditor value={form.hours} onChange={(v) => set('hours', v)} />
+          {!hasHours(form.hours) && (
+            <p className="text-xs font-semibold text-slate-500">No hours yet, so the site shows “Hours TBA” (not “Closed”) until you add them.</p>
+          )}
           <Field label="Hours note">
             <input className={inputClass} value={form.hours_note} onChange={(e) => set('hours_note', e.target.value)} placeholder="e.g. Last call 1:30 AM · Cover after 11 PM · Kitchen till 10" />
           </Field>

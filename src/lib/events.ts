@@ -38,9 +38,9 @@ export function isEventInDateRange(e: Pick<NightEvent, 'start_date' | 'end_date'
   return now >= new Date(e.start_date).getTime() && now <= endTime(e);
 }
 
-/** Live = within the date range AND within today's hours (true when no hours are set). */
-export function isEventLive(e: Pick<NightEvent, 'start_date' | 'end_date' | 'hours'>, now = Date.now()) {
-  if (!isEventInDateRange(e, now)) return false;
+/** Live = within the date range AND within today's hours (true when no hours are set). Never while the time is TBA. */
+export function isEventLive(e: Pick<NightEvent, 'start_date' | 'end_date' | 'hours' | 'time_tba'>, now = Date.now()) {
+  if (e.time_tba || !isEventInDateRange(e, now)) return false;
   return !hasHours(e.hours) || openState(e.hours, now).kind === 'open';
 }
 
@@ -97,7 +97,9 @@ export function eventWhen(e: NightEvent, now = Date.now()): string {
   const start = new Date(e.start_date);
   const end = e.end_date ? new Date(e.end_date) : null;
   const multiDay = !end || end.getTime() - start.getTime() > DAY_MS;
-  const time = (d: Date) => fmt(d, { hour: 'numeric', minute: '2-digit' }).replace(':00', '');
+  // A TBA event's stored times are just "the whole night"; never print them.
+  const tba = !!e.time_tba;
+  const time = (d: Date) => (tba ? 'Time TBA' : fmt(d, { hour: 'numeric', minute: '2-digit' }).replace(':00', ''));
   const date = (d: Date) => fmt(d, { month: 'short', day: 'numeric' });
 
   if (isEventLive(e, now)) {
@@ -117,8 +119,8 @@ export function eventWhen(e: NightEvent, now = Date.now()): string {
     // A bounded run says when it stops; an open-ended one which nights it repeats.
     const tail = end ? `until ${date(new Date(end.getTime() - DAY_MS / 2))}` : pattern.replace('Every', 'every');
     const next = nextSession(e, now);
-    if (!next) return end ? `${pattern} · ${tail}` : pattern;
-    const at = next.opensAt ? formatTime(next.opensAt) : time(new Date(next.at));
+    if (!next) return end ? `${pattern} · ${tail}` : tba ? `${pattern} · Time TBA` : pattern;
+    const at = tba ? 'Time TBA' : next.opensAt ? formatTime(next.opensAt) : time(new Date(next.at));
     if (nassauDay(next.at) === today) return `Tonight · ${at} · ${tail}`;
     if (nassauDay(next.at) === tomorrow) return `Tomorrow · ${at} · ${tail}`;
     if (start.getTime() - now > 6 * DAY_MS) return `${pattern} from ${date(start)} · ${at}`;
@@ -128,7 +130,7 @@ export function eventWhen(e: NightEvent, now = Date.now()): string {
   if (multiDay) {
     if (!end) return start.getTime() <= now ? 'Ongoing' : `From ${date(start)}`;
     const range = `${date(start)} – ${date(end)}`;
-    if (hasHours(e.hours) && start.getTime() <= now) {
+    if (hasHours(e.hours) && start.getTime() <= now && !tba) {
       const todayHours = e.hours[String(todayIndex(now))];
       return todayHours ? `Tonight ${dayLabel(todayHours)} · runs ${range}` : `Runs ${range}`;
     }

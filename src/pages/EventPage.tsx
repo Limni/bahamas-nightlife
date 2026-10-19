@@ -274,7 +274,11 @@ export default function EventPage() {
                 <Clock className="w-4 h-4" /> When
               </h3>
               <p className="text-sm font-bold text-white">
-                {recurring
+                {e.time_tba
+                  ? recurring
+                    ? recurrenceLabel(e.hours, true)
+                    : fmt(e.start_date, { weekday: 'long', month: 'long', day: 'numeric' })
+                  : recurring
                   ? recurrenceLabel(e.hours, true)
                   : !e.end_date
                     ? `From ${fmt(e.start_date, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`
@@ -282,13 +286,18 @@ export default function EventPage() {
                       ? `${fmt(e.start_date, { weekday: 'long', month: 'long', day: 'numeric' })}, ${fmt(e.start_date, { hour: 'numeric', minute: '2-digit' })} – ${fmt(e.end_date, { hour: 'numeric', minute: '2-digit' })}`
                       : `${fmt(e.start_date, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} → ${fmt(e.end_date, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`}
               </p>
+              {e.time_tba && (
+                <p className="mt-1 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-400/15 text-amber-200 text-xs font-extrabold">
+                  <Clock className="w-3.5 h-3.5" /> Time TBA · check back closer to the night
+                </p>
+              )}
               {recurring && (
                 <p className="mt-0.5 text-xs font-semibold text-night-300">
                   {new Date(e.start_date).getTime() > now ? 'Starts' : 'Since'} {fmt(e.start_date, { month: 'short', day: 'numeric', year: 'numeric' })}
                   {lastNight ? ` · last night ${fmt(lastNight, { month: 'short', day: 'numeric', year: 'numeric' })}` : ' · until further notice'}
                 </p>
               )}
-              {hasHours(e.hours) && (
+              {hasHours(e.hours) && !e.time_tba && (
                 <ul className="mt-3 space-y-1">
                   {[1, 2, 3, 4, 5, 6, 0].filter((d) => !recurring || e.hours![String(d)]).map((d) => (
                     <li

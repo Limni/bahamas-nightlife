@@ -179,6 +179,8 @@ export interface NightEvent {
   end_date: string | null;
   /** Optional weekly windows inside the date range (same format as venue hours); set = a weekly/recurring event. */
   hours: WeeklyHours | null;
+  /** The time isn't announced yet: stored as the whole night, shown as "Time TBA", never live. */
+  time_tba?: boolean;
   /** The first flyer (or first video's poster), kept in sync from event_media by a trigger. */
   image_url: string | null;
   image_path: string | null;

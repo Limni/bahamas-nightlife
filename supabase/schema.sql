@@ -2680,3 +2680,11 @@ $$;
 
 revoke execute on function public.void_redemption(uuid) from public, anon;
 grant execute on function public.void_redemption(uuid) to authenticated;
+
+-- =============================================================================
+-- Events whose time isn't announced yet ("Time TBA"). The row still has a date
+-- (or weekly nights): it's stored as the whole night (noon to 6 AM) so it
+-- counts for "tonight" / "this week", but the app never shows it as live and
+-- prints "Time TBA" instead of a time.
+-- =============================================================================
+alter table public.events add column if not exists time_tba boolean not null default false;

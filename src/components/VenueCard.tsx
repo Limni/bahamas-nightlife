@@ -10,7 +10,14 @@ import { FavoriteButton } from './FavoriteButton';
 
 function OpenPill({ r, now }: { r: Venue; now: number }) {
   const s = openState(r.hours, now);
-  if (s.kind === 'unknown') return null;
+  if (s.kind === 'unknown') {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-extrabold backdrop-blur ring-1 ring-white/10 bg-night-950/70 text-white/70">
+        <span className="w-1.5 h-1.5 rounded-full border border-white/60" />
+        Hours TBA
+      </span>
+    );
+  }
   const open = s.kind === 'open';
   return (
     <span

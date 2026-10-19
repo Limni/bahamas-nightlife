@@ -35,7 +35,15 @@ export function Chip({
 
 export function OpenBadge({ hours, now, compact }: { hours: WeeklyHours | null; now?: number; compact?: boolean }) {
   const state = openState(hours, now);
-  if (state.kind === 'unknown') return null;
+  // No hours entered yet: say so rather than leave a gap.
+  if (state.kind === 'unknown') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-bold text-night-300">
+        <span className="w-2 h-2 rounded-full border border-night-400" />
+        Hours TBA
+      </span>
+    );
+  }
   const open = state.kind === 'open';
   return (
     <span className={`inline-flex items-center gap-1.5 text-xs font-bold ${open ? 'text-emerald-400' : 'text-night-300'}`}>

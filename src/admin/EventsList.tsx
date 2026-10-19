@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarHeart, MapPinOff, Plus, Repeat, Search, Star } from 'lucide-react';
+import { CalendarHeart, MapPinOff, Plus, Repeat, Search, Star, Clock } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { compareEvents, eventPosition, eventWhen, isEventEnded, isEventLive, isRecurring } from '@/lib/events';
 import type { NightEvent, Venue } from '@/lib/types';
@@ -121,6 +121,11 @@ export default function EventsList() {
                       {isRecurring(e) && (
                         <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-brand-50 text-brand-700 text-[10px] font-extrabold uppercase">
                           <Repeat className="w-3 h-3" /> {e.end_date ? 'Weekly' : 'Weekly · no end'}
+                        </span>
+                      )}
+                      {e.time_tba && (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-sky-100 text-sky-800 text-[10px] font-extrabold uppercase">
+                          <Clock className="w-3 h-3" /> Time TBA
                         </span>
                       )}
                       {e.is_featured && (
