@@ -4,7 +4,7 @@ Guidance for AI coding agents (and humans) working in this repository. Read this
 
 ## What this is
 
-**Nassau Nights** (https://nassaunights.limniatis.com) is a nightlife guide for Nassau, Bahamas: bars, clubs, lounges, beach bars and events. It is a **clone of Nassau Eats** (`Limni/bahamas-nassaueats`), restyled as a dark neon site, with two features the eats site doesn't have:
+**Nassau Nights** (https://nassaunights.com) is a nightlife guide for Nassau, Bahamas: bars, clubs, lounges, beach bars and events. It is a **clone of Nassau Eats** (`Limni/bahamas-nassaueats`), restyled as a dark neon site, with two features the eats site doesn't have:
 
 - **Highlighted events**, ported from Island GO (`Limni/bahamas-exp`). Events are one-off (a date range) or **weekly/recurring** (weekly hours, optionally with no end date: "Ladies Night every Friday"), and live ones pulse on the map.
 - **Live radio** from a partner broadcaster (100 Jamz, Joy FM, Kiss FM, Y98 FM): an opt-in station picker and a mini-player that keeps playing across pages.
@@ -519,8 +519,8 @@ The full runbook is in **`DEPLOY.md`**. The essentials:
   | Logs | `islandgo.*` | `nassaunights.*` |
   | `$connection_upgrade` map | defines it in `conf.d/islandgo-upgrade-map.conf` | **reuses** it; never define it twice. `deploy/nassaunights-upgrade-map.conf` is only for servers without it |
 
-- **DNS:** Cloudflare `nassaunights` record, proxied. A first-level subdomain is covered by `*.limniatis.com` Universal SSL.
-- **Second domain:** the vhost's `server_name` also lists `nassaunights.com` and `www.nassaunights.com` (the container redirects www to https://nassaunights.com, preserving path and query). That zone must be proxied by Cloudflare in **Full** (not strict) mode, because the origin reuses Island GO's certificate. SEO uses the official https://nassaunights.com origin; auth email links still use `window.location.origin`. See `docs/domains-and-seo.md`.
+- **DNS:** Cloudflare `nassaunights` record, proxied (kept: it now only redirects, and old links and auth emails still work through it). A first-level subdomain is covered by `*.limniatis.com` Universal SSL.
+- **Second domain:** the vhost's `server_name` also lists `nassaunights.com` and `www.nassaunights.com` ; the container (`nginx.conf`) 301-redirects both `www.nassaunights.com` and the original `nassaunights.limniatis.com` to https://nassaunights.com, preserving path and query, so the vhost and DNS stay as they are. That zone must be proxied by Cloudflare in **Full** (not strict) mode, because the origin reuses Island GO's certificate. SEO uses the official https://nassaunights.com origin; auth email links still use `window.location.origin`. See `docs/domains-and-seo.md`.
 - **Manual deploy:** `./deploy.sh build|deploy|update|logs|stop|status`. It reads `.env`, then `.env.local`.
 - **Analytics / SEO:** GA4 (`G-FWM1NM6DRJ`) is a plain gtag snippet in `index.html`; SPA route changes are counted by GA4 enhanced measurement (history events), so there is no router hook. `scripts/sitemap.mjs` builds the sitemap at build time with the anon key (RLS = published only) and never fails the build (no Supabase → fixed pages only). nginx serves `/sitemap.xml` and `/robots.txt` as files with a 1-hour cache.
 

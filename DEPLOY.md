@@ -80,12 +80,12 @@ Go to **Settings → Secrets and variables → Actions**.
 Optional **Variables**:
 - `PORT`: overrides the default `5110`. If you change it, change the vhost upstream too.
 - `VITE_MAP_TILE_URL` and `VITE_MAP_ATTRIBUTION`: switch the map tile provider.
-- `SITE_URL`: the domain used in `sitemap.xml` and `robots.txt` (default `https://nassaunights.com`). Set it to the property you verify in Google Search Console, e.g. `https://nassaunights.limniatis.com`.
+- `SITE_URL`: the domain used in `sitemap.xml` and `robots.txt` (default `https://nassaunights.com`). It must stay `https://nassaunights.com` (the build refuses anything else, so the sitemap always matches the canonical tags and the redirects).
 
 ## 5. Outside the server
 
 - **Stadia Maps** (map tiles): create a free account at stadiamaps.com and add `nassaunights.limniatis.com`, `nassaunights.com` and `www.nassaunights.com` as allowed domains. Until you do, the map will show no tiles on the live site. It works on localhost without this.
-- **Supabase**: Nassau Nights uses its **own** Supabase project (not Nassau Eats'). Create it, run `supabase/schema.sql` in the SQL Editor, and put its URL and anon key in the repo secrets above. Under Authentication → URL Configuration, set **Site URL** to the domain you want auth emails to point at by default (e.g. `https://nassaunights.com`), and add **Redirect URLs** `https://nassaunights.com/**`, `https://www.nassaunights.com/**`, `https://nassaunights.limniatis.com/**` and `http://localhost:3000/**`. The app asks for a redirect back to whichever domain the visitor is on; Supabase only honours ones in that list (otherwise it falls back to the Site URL).
+- **Supabase**: Nassau Nights uses its **own** Supabase project (not Nassau Eats'). Create it, run `supabase/schema.sql` in the SQL Editor, and put its URL and anon key in the repo secrets above. Under Authentication → URL Configuration, set **Site URL** to the domain you want auth emails to point at by default (e.g. `https://nassaunights.com`), and add **Redirect URLs** `https://nassaunights.com/**`, `https://www.nassaunights.com/**`, `https://nassaunights.limniatis.com/**` and `http://localhost:3000/**`. (www and the limniatis subdomain now redirect to nassaunights.com, keeping the link's code/token, so set the Site URL to `https://nassaunights.com`; keep the other two listed until old emails have expired.) The app asks for a redirect back to whichever domain the visitor is on; Supabase only honours ones in that list (otherwise it falls back to the Site URL).
 - **Member invitations** (Admin → Members → Invite):
   1. **Function (required):** Edge Functions → **Deploy a new function** → **Via editor**, name it exactly `invite-member`, paste `supabase/functions/invite-member/index.ts` and deploy. Leave **Verify JWT** on. (With the CLI: `supabase functions deploy invite-member`.) The project URL and keys are provided to it automatically; the service-role key never leaves Supabase.
 
@@ -137,8 +137,9 @@ Builds use a lot of memory on a small VM. That's why CI does the build, and you 
 ```bash
 docker ps --format 'table {{.Names}}\t{{.Ports}}'     # island-explorer :5050, nassaunights 127.0.0.1:5110
 curl -sI http://127.0.0.1:5110/ | head -1             # 200 from the container
-curl -sI -H 'Host: nassaunights.limniatis.com' http://127.0.0.1/ | head -1   # 200 via host nginx
+curl -sI -H 'Host: nassaunights.com' http://127.0.0.1/ | head -1              # 200 via host nginx
+curl -sI -H 'Host: nassaunights.limniatis.com' http://127.0.0.1/ | grep -i ^location   # 301 to https://nassaunights.com/
 curl -sI -H 'Host: islandgo.limniatis.com'  http://127.0.0.1/ | head -1    # Island GO still answers
 # :443 is what Cloudflare actually uses. Expect "Nassau Nights", not "Nassau GO".
-curl -sk --resolve nassaunights.limniatis.com:443:127.0.0.1 https://nassaunights.limniatis.com/ | grep -o '<title>[^<]*</title>'
+curl -sk --resolve nassaunights.com:443:127.0.0.1 https://nassaunights.com/ | grep -o '<title>[^<]*</title>'
 ```

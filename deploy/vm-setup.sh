@@ -43,8 +43,14 @@ command -v nginx >/dev/null || die "nginx isn't installed on this host."
 
 mode="${1:-install}"
 
+# The page title a host serves, or where it redirects (the app sends
+# nassaunights.limniatis.com and www to https://nassaunights.com).
 title_of() {
-  curl -sk --noproxy '*' --max-time 10 --resolve "$1:443:127.0.0.1" "https://$1/" | grep -o '<title>[^<]*</title>' || echo '<no title>'
+  local page to
+  page="$(curl -sk --noproxy '*' --max-time 10 --resolve "$1:443:127.0.0.1" -w '\nREDIRECT:%{redirect_url}' "https://$1/" || true)"
+  to="$(sed -n 's/^REDIRECT://p' <<<"$page")"
+  if [[ -n $to ]]; then echo "redirects to $to"; return; fi
+  grep -o '<title>[^<]*</title>' <<<"$page" | head -1 | grep . || echo '<no title>'
 }
 
 port_owner() { ss -ltnpH "( sport = :$PORT )" 2>/dev/null | head -1; }

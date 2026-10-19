@@ -71,10 +71,15 @@ fi
 systemctl reload nginx
 log "nginx reloaded."
 
+# The page title a host serves, or where it redirects (the app sends
+# nassaunights.limniatis.com and www to https://nassaunights.com).
 check() {
   local host="$1"
-  local title
-  title="$(curl -sk --max-time 10 --resolve "$host:443:127.0.0.1" "https://$host/" | grep -o '<title>[^<]*</title>' || true)"
+  local page title to
+  page="$(curl -sk --max-time 10 --resolve "$host:443:127.0.0.1" -w '\nREDIRECT:%{redirect_url}' "https://$host/" || true)"
+  to="$(sed -n 's/^REDIRECT://p' <<<"$page")"
+  title="$(grep -o '<title>[^<]*</title>' <<<"$page" | head -1 || true)"
+  [[ -n $to ]] && title="redirects to $to"
   printf '      %-28s %s\n' "$host" "${title:-<no title>}"
 }
 log "Origin :443 now answers:"
