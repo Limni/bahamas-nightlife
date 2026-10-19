@@ -5,7 +5,7 @@ Plans and suggestions for features that aren't built yet, or are only partly bui
 | Doc | Status |
 | --- | --- |
 | [bar-crawl.md](bar-crawl.md) | Phase 1 **built** (`/crawl`). Phases 2–3 proposed: street routing from OpenStreetMap, saved crawls, free-text requests, live "you're at stop 2" |
-| [rewards.md](rewards.md) | Phase 1 **built** (earning points for check-ins and applied suggestions). Phase 2 proposed: rewards at bars that opt in, held points, staff PIN / manager confirmation |
+| [rewards.md](rewards.md) | **Built**: points for check-ins and applied suggestions, and rewards at sponsored partner bars (QR codes, staff scanner). Open: abuse limits, terms, partner reports |
 | [nassau-days.md](nassau-days.md) | Proposed: a daytime sister site on nassaudays.com (same app, day/night "scene"), with a sunrise transition |
 | [domains-and-seo.md](domains-and-seo.md) | **Built**: one canonical address (https://nassaunights.com); www and the limniatis subdomain redirect |
 

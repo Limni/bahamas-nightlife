@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Gift, MapPinCheck, MessageSquarePlus, SlidersHorizontal } from 'lucide-react';
+import { Gift, MapPinCheck, MessageSquarePlus, ScanLine, SlidersHorizontal, Undo2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { loadPointsConfig } from '@/lib/points';
 import { Spinner } from '@/components/ui';
@@ -37,6 +37,25 @@ interface Entry {
   created_at: string;
   profiles: { display_name: string } | null;
   venues: { id: string; name: string } | null;
+}
+
+interface PartnerRow {
+  venue_id: string;
+  is_active: boolean;
+  starts_on: string | null;
+  ends_on: string | null;
+  venues: { id: string; name: string; is_published: boolean } | null;
+}
+
+interface RedemptionRow {
+  id: string;
+  title: string;
+  points: number;
+  created_at: string;
+  voided_at: string | null;
+  venue_id: string | null;
+  profiles: { display_name: string } | null;
+  venues: { name: string } | null;
 }
 
 const MISSING = 'Points aren’t in the database yet. Re-run supabase/schema.sql.';
@@ -95,6 +114,10 @@ export default function PointsAdmin() {
   const [leaders, setLeaders] = useState<Leader[] | null>(null);
   const [latest, setLatest] = useState<Entry[]>([]);
   const [adjusting, setAdjusting] = useState<string | null>(null);
+  const [partners, setPartners] = useState<PartnerRow[]>([]);
+  const [rewardCounts, setRewardCounts] = useState<Record<string, number>>({});
+  const [redemptions, setRedemptions] = useState<RedemptionRow[]>([]);
+  const { confirm } = useFeedback();
 
   const loadActivity = useCallback(() => {
     supabase.rpc('admin_points_leaders', { p_limit: 50 }).then(({ data }) => setLeaders((data as Leader[]) ?? []));
@@ -104,7 +127,41 @@ export default function PointsAdmin() {
       .order('created_at', { ascending: false })
       .limit(30)
       .then(({ data }) => setLatest((data ?? []) as unknown as Entry[]));
+    // Rewards (absent until the schema is re-run: these just come back empty).
+    supabase
+      .from('reward_partners')
+      .select('venue_id, is_active, starts_on, ends_on, venues(id, name, is_published)')
+      .then(({ data }) => setPartners(((data ?? []) as unknown as PartnerRow[]).sort((a, b) => (a.venues?.name ?? '').localeCompare(b.venues?.name ?? ''))));
+    supabase
+      .from('rewards')
+      .select('venue_id')
+      .eq('is_active', true)
+      .then(({ data }) => {
+        const c: Record<string, number> = {};
+        for (const r of (data ?? []) as { venue_id: string }[]) c[r.venue_id] = (c[r.venue_id] ?? 0) + 1;
+        setRewardCounts(c);
+      });
+    supabase
+      .from('redemptions')
+      .select('id, title, points, created_at, voided_at, venue_id, profiles(display_name), venues(name)')
+      .order('created_at', { ascending: false })
+      .limit(30)
+      .then(({ data }) => setRedemptions((data ?? []) as unknown as RedemptionRow[]));
   }, []);
+
+  const voidRedemption = async (r: RedemptionRow) => {
+    const ok = await confirm({
+      title: `Undo ${r.title}?`,
+      body: `Refunds ${r.points} points to ${r.profiles?.display_name ?? 'the member'}.`,
+      confirmLabel: 'Undo and refund',
+      danger: true,
+    });
+    if (!ok) return;
+    const { error } = await supabase.rpc('void_redemption', { p_redemption: r.id });
+    if (error) return toast(error.message, 'error');
+    toast('Refunded');
+    loadActivity();
+  };
 
   useEffect(() => {
     supabase
@@ -160,7 +217,7 @@ export default function PointsAdmin() {
       <div>
         <h1 className="text-2xl font-black text-slate-900">Points</h1>
         <p className="text-sm font-semibold text-slate-500">
-          Members earn points for checking in at spots and for suggestions you apply in the Inbox. Redeeming them for rewards at bars that opt in comes next.
+          Members earn points for checking in at spots and for suggestions you apply in the Inbox, and spend them on rewards at partner bars.
         </p>
       </div>
 
@@ -182,6 +239,72 @@ export default function PointsAdmin() {
             Save
           </Button>
         </div>
+      </Panel>
+
+      <Panel
+        title="Reward partners"
+        action={
+          <Link to="/manage/redeem" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-extrabold text-slate-700 bg-slate-100 hover:bg-slate-200">
+            <ScanLine className="w-4 h-4" /> Scanner
+          </Link>
+        }
+      >
+        <p className="text-sm font-semibold text-slate-500 mb-3">
+          Make a spot a partner in its editor (<b>Rewards</b> panel): dates, deal notes, and its rewards. Its managers can then set rewards themselves, and staff
+          you add under <b>Managers &amp; staff</b> scan members’ codes.
+        </p>
+        {partners.length === 0 ? (
+          <p className="text-sm font-semibold text-slate-400">No partners yet.</p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {partners.map((p) => {
+              const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Nassau' });
+              const live = p.is_active && !!p.venues?.is_published && (!p.starts_on || p.starts_on <= today) && (!p.ends_on || p.ends_on >= today);
+              return (
+                <li key={p.venue_id} className="flex items-center gap-3 py-2.5">
+                  <Gift className={`w-4 h-4 shrink-0 ${live ? 'text-amber-500' : 'text-slate-300'}`} />
+                  <span className="min-w-0 flex-1">
+                    <Link to={`/admin/v/${p.venue_id}#rewards`} className="block font-extrabold text-slate-900 truncate hover:text-brand-700">
+                      {p.venues?.name ?? 'Venue'}
+                    </Link>
+                    <span className="block text-xs font-semibold text-slate-500">
+                      {rewardCounts[p.venue_id] ?? 0} reward{rewardCounts[p.venue_id] === 1 ? '' : 's'}
+                      {p.ends_on ? ` · until ${p.ends_on}` : ''}
+                      {live ? '' : ' · not taking points today'}
+                    </span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Panel>
+
+      <Panel title="Recent redemptions">
+        {redemptions.length === 0 ? (
+          <p className="text-sm font-semibold text-slate-500">None yet.</p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {redemptions.map((r) => (
+              <li key={r.id} className={`flex items-center gap-3 py-2 ${r.voided_at ? 'opacity-50' : ''}`}>
+                <Gift className="w-4 h-4 text-slate-400 shrink-0" />
+                <span className="min-w-0 flex-1 text-sm">
+                  <span className="block font-bold text-slate-900 truncate">
+                    {r.profiles?.display_name ?? 'Member'} · {r.title} · {r.venues?.name ?? 'Venue'}
+                  </span>
+                  <span className="block text-xs font-semibold text-slate-500">
+                    {when(r.created_at)} · {r.points} points{r.voided_at ? ' · undone, refunded' : ''}
+                  </span>
+                </span>
+                {!r.voided_at && (
+                  <Button variant="ghost" className="px-2.5 py-1.5 text-slate-500" onClick={() => voidRedemption(r)} aria-label={`Undo ${r.title}`}>
+                    <Undo2 className="w-4 h-4" />
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </Panel>
 
       <Panel title="Top members">

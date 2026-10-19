@@ -1583,8 +1583,11 @@ create policy "Managers delete venue media" on storage.objects
   for delete using (bucket_id = 'venue-media' and public.can_manage_media(name));
 
 -- Admin: who manages a venue, with emails (auth.users isn't readable via the API).
-create or replace function public.admin_venue_managers(p_venue uuid)
-returns table (user_id uuid, email text, display_name text, created_at timestamptz)
+-- Its result columns gained "role" (staff, below), so drop it before recreating it.
+-- plpgsql only resolves m.role when called, so this works before the column exists.
+drop function if exists public.admin_venue_managers(uuid);
+create function public.admin_venue_managers(p_venue uuid)
+returns table (user_id uuid, email text, display_name text, role text, created_at timestamptz)
 language plpgsql
 stable
 security definer
@@ -1596,12 +1599,12 @@ begin
     raise exception 'Only admins can list managers' using errcode = '42501';
   end if;
   return query
-  select m.user_id, u.email::text, coalesce(p.display_name, 'Member'), m.created_at
+  select m.user_id, u.email::text, coalesce(p.display_name, 'Member'), m.role, m.created_at
   from public.venue_managers m
   join auth.users u on u.id = m.user_id
   left join public.profiles p on p.id = m.user_id
   where m.venue_id = p_venue
-  order by m.created_at;
+  order by m.role, m.created_at;
 end;
 $$;
 
@@ -2220,3 +2223,460 @@ $$;
 
 revoke execute on function public.admin_points_leaders(int) from public, anon;
 grant execute on function public.admin_points_leaders(int) to authenticated;
+
+-- =============================================================================
+-- Rewards: members spend points at bars with a sponsorship deal ("reward
+-- partners"). An admin makes a venue a partner; its managers set the rewards
+-- and their point costs. The member shows a QR code from their account (a
+-- short-lived, single-use code) and venue staff scan it in /manage → Redeem.
+-- Every redemption is a negative points_ledger row, so voiding one is a refund.
+-- See docs/rewards.md.
+-- =============================================================================
+
+-- Venue staff: assigned like managers but only redeem points (bartenders don't
+-- get to edit the listing). Existing rows stay managers.
+alter table public.venue_managers add column if not exists role text not null default 'manager';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'venue_managers_role_check') then
+    alter table public.venue_managers add constraint venue_managers_role_check check (role in ('manager', 'staff'));
+  end if;
+end $$;
+
+-- Managers edit; staff don't. (Replaces the definition above.)
+create or replace function public.is_venue_manager(p_venue uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select auth.uid() is not null
+     and p_venue is not null
+     and exists (select 1 from public.venue_managers m where m.venue_id = p_venue and m.user_id = auth.uid() and m.role = 'manager')
+     and not public.is_suspended();
+$$;
+
+-- Managers and staff may redeem at the venue.
+create or replace function public.is_venue_staff(p_venue uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select auth.uid() is not null
+     and p_venue is not null
+     and exists (select 1 from public.venue_managers m where m.venue_id = p_venue and m.user_id = auth.uid())
+     and not public.is_suspended();
+$$;
+
+grant execute on function public.is_venue_staff(uuid) to anon, authenticated;
+
+-- admin_venue_managers() returns the role too (defined with the venue managers above).
+
+
+-- The sponsorship: which venues take points, and for how long. Admin-only
+-- (the note holds the deal); everyone else asks is_reward_partner().
+create table if not exists public.reward_partners (
+  venue_id   uuid primary key references public.venues (id) on delete cascade,
+  is_active  boolean not null default true,
+  starts_on  date,
+  ends_on    date,
+  note       text check (note is null or char_length(note) <= 500),
+  created_by uuid default auth.uid() references auth.users (id) on delete set null,
+  created_at timestamptz not null default now(),
+  constraint reward_partners_dates check (ends_on is null or starts_on is null or ends_on >= starts_on)
+);
+
+alter table public.reward_partners enable row level security;
+
+drop policy if exists "Admins manage reward partners" on public.reward_partners;
+create policy "Admins manage reward partners" on public.reward_partners
+  for all using (public.is_admin()) with check (public.is_admin());
+
+-- A published venue with an active deal covering today (Nassau date).
+create or replace function public.is_reward_partner(p_venue uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.reward_partners rp
+    join public.venues v on v.id = rp.venue_id
+    where rp.venue_id = p_venue
+      and rp.is_active
+      and v.is_published
+      and (rp.starts_on is null or rp.starts_on <= (now() at time zone 'America/Nassau')::date)
+      and (rp.ends_on is null or rp.ends_on >= (now() at time zone 'America/Nassau')::date)
+  );
+$$;
+
+grant execute on function public.is_reward_partner(uuid) to anon, authenticated;
+
+create table if not exists public.rewards (
+  id            uuid primary key default gen_random_uuid(),
+  venue_id      uuid not null references public.venues (id) on delete cascade,
+  title         text not null check (char_length(title) between 1 and 60),
+  description   text check (description is null or char_length(description) <= 200),
+  cost          int not null check (cost between 1 and 100000),
+  nightly_limit int check (nightly_limit is null or nightly_limit between 1 and 20),  -- per member per night
+  is_active     boolean not null default true,
+  sort          int not null default 0,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+create index if not exists rewards_venue_idx on public.rewards (venue_id, sort);
+
+drop trigger if exists rewards_touch on public.rewards;
+create trigger rewards_touch
+  before update on public.rewards
+  for each row execute function public.touch_updated_at();
+
+alter table public.rewards enable row level security;
+
+drop policy if exists "Partner rewards are public" on public.rewards;
+create policy "Partner rewards are public" on public.rewards
+  for select using (
+    (is_active and public.is_reward_partner(venue_id))
+    or public.is_admin()
+    or public.is_venue_staff(venue_id)
+  );
+
+drop policy if exists "Admins manage rewards" on public.rewards;
+create policy "Admins manage rewards" on public.rewards
+  for all using (public.is_admin()) with check (public.is_admin());
+
+-- Managers price their own rewards, but only while the venue is a partner.
+drop policy if exists "Managers manage their rewards" on public.rewards;
+create policy "Managers manage their rewards" on public.rewards
+  for all using (public.is_venue_manager(venue_id) and public.is_reward_partner(venue_id))
+  with check (public.is_venue_manager(venue_id) and public.is_reward_partner(venue_id));
+
+-- The member's QR: 8 characters, valid 5 minutes, used once. No policies:
+-- only the functions below read or write it.
+create table if not exists public.redeem_codes (
+  code       text primary key check (code ~ '^[A-Z0-9]{8}$'),
+  user_id    uuid not null references public.profiles (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  used_at    timestamptz
+);
+
+create index if not exists redeem_codes_user_idx on public.redeem_codes (user_id);
+
+alter table public.redeem_codes enable row level security;
+
+create table if not exists public.redemptions (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references public.profiles (id) on delete cascade,
+  venue_id   uuid references public.venues (id) on delete set null,
+  reward_id  uuid references public.rewards (id) on delete set null,
+  title      text not null check (char_length(title) between 1 and 60),  -- the reward as it was
+  points     int not null check (points > 0),
+  night      date not null,
+  staff_id   uuid references auth.users (id) on delete set null,
+  created_at timestamptz not null default now(),
+  voided_at  timestamptz,
+  voided_by  uuid references auth.users (id) on delete set null
+);
+
+create index if not exists redemptions_venue_idx on public.redemptions (venue_id, created_at desc);
+create index if not exists redemptions_user_idx on public.redemptions (user_id, created_at desc);
+
+alter table public.redemptions enable row level security;
+
+drop policy if exists "Redemptions: member, venue staff, admins" on public.redemptions;
+create policy "Redemptions: member, venue staff, admins" on public.redemptions
+  for select using (user_id = auth.uid() or public.is_admin() or public.is_venue_staff(venue_id));
+-- No write policies: redeem_confirm() and void_redemption() only.
+
+alter table public.points_ledger
+  add column if not exists redemption_id uuid unique references public.redemptions (id) on delete set null;
+
+-- A fresh code for the signed-in member (any older unused one stops working).
+create or replace function public.create_redeem_code()
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  v_uid     uuid := auth.uid();
+  v_alpha   text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';  -- no 0/O or 1/I
+  v_bytes   bytea;
+  v_code    text;
+  v_expires timestamptz := now() + interval '5 minutes';
+  v_balance int;
+begin
+  if v_uid is null then
+    return jsonb_build_object('status', 'signed_out');
+  end if;
+  if public.is_suspended() then
+    return jsonb_build_object('status', 'suspended');
+  end if;
+  if not coalesce((select points_enabled from public.site_settings where id), false) then
+    return jsonb_build_object('status', 'disabled');
+  end if;
+  delete from public.redeem_codes where user_id = v_uid and used_at is null;
+  delete from public.redeem_codes where created_at < now() - interval '1 day';
+  for attempt in 1..5 loop
+    -- 8 random bytes from a v4 uuid, each mod 32 (256 is a multiple of 32, so no bias).
+    v_bytes := uuid_send(gen_random_uuid());
+    v_code := '';
+    for i in 0..7 loop
+      v_code := v_code || substr(v_alpha, 1 + get_byte(v_bytes, i) % 32, 1);
+    end loop;
+    begin
+      insert into public.redeem_codes (code, user_id, expires_at) values (v_code, v_uid, v_expires);
+      exit;
+    exception when unique_violation then
+      v_code := null;
+    end;
+  end loop;
+  if v_code is null then
+    raise exception 'Could not create a code, try again';
+  end if;
+  select coalesce(sum(points), 0)::int into v_balance from public.points_ledger where user_id = v_uid;
+  return jsonb_build_object('status', 'ok', 'code', v_code, 'expires_at', v_expires, 'balance', v_balance);
+end;
+$$;
+
+revoke execute on function public.create_redeem_code() from public, anon;
+grant execute on function public.create_redeem_code() to authenticated;
+
+-- The member's screen polls this to show "Redeemed!" the moment staff confirm.
+create or replace function public.redeem_code_status(p_code text)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_row     public.redeem_codes%rowtype;
+  v_red     record;
+  v_balance int;
+begin
+  select * into v_row from public.redeem_codes where code = upper(p_code) and user_id = auth.uid();
+  if not found then
+    return jsonb_build_object('status', 'unknown');
+  end if;
+  if v_row.used_at is not null then
+    select r.title, r.points, v.name as venue into v_red
+    from public.redemptions r left join public.venues v on v.id = r.venue_id
+    where r.user_id = v_row.user_id and r.created_at >= v_row.used_at - interval '5 seconds'
+    order by r.created_at
+    limit 1;
+    select coalesce(sum(points), 0)::int into v_balance from public.points_ledger where user_id = v_row.user_id;
+    return jsonb_build_object('status', 'used', 'title', v_red.title, 'points', v_red.points, 'venue', v_red.venue, 'balance', v_balance);
+  end if;
+  if v_row.expires_at < now() then
+    return jsonb_build_object('status', 'expired');
+  end if;
+  return jsonb_build_object('status', 'waiting', 'expires_at', v_row.expires_at);
+end;
+$$;
+
+revoke execute on function public.redeem_code_status(text) from public, anon;
+grant execute on function public.redeem_code_status(text) to authenticated;
+
+-- Venues the caller can redeem at: partner venues they manage or staff (all
+-- partner venues for admins).
+create or replace function public.my_redeem_venues()
+returns table (venue_id uuid, name text, slug text, cover_url text, role text)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select v.id, v.name, v.slug, v.cover_url,
+         coalesce(m.role, 'admin')
+  from public.venues v
+  left join public.venue_managers m on m.venue_id = v.id and m.user_id = auth.uid()
+  where public.is_reward_partner(v.id)
+    and not public.is_suspended()
+    and (m.user_id is not null or public.is_admin())
+  order by v.name;
+$$;
+
+revoke execute on function public.my_redeem_venues() from public, anon;
+grant execute on function public.my_redeem_venues() to authenticated;
+
+-- Shared checks for the staff side. Returns null when fine, else a status.
+create or replace function public.redeem_guard(p_venue uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when auth.uid() is null then 'signed_out'
+    when not (public.is_admin() or public.is_venue_staff(p_venue)) then 'forbidden'
+    when not public.is_reward_partner(p_venue) then 'not_partner'
+    when not coalesce((select points_enabled from public.site_settings where id), false) then 'disabled'
+  end;
+$$;
+
+revoke execute on function public.redeem_guard(uuid) from public, anon;
+
+-- Staff scanned a code: who it is, their balance, and what they can afford here.
+-- The member's id never leaves the database.
+create or replace function public.redeem_lookup(p_venue uuid, p_code text)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_guard   text := public.redeem_guard(p_venue);
+  v_row     public.redeem_codes%rowtype;
+  v_name    text;
+  v_balance int;
+  v_night   date := public.points_night();
+begin
+  if v_guard is not null then
+    return jsonb_build_object('status', v_guard);
+  end if;
+  select * into v_row from public.redeem_codes where code = upper(regexp_replace(coalesce(p_code, ''), '[^A-Za-z0-9]', '', 'g'));
+  if not found then
+    return jsonb_build_object('status', 'unknown');
+  end if;
+  if v_row.used_at is not null then
+    return jsonb_build_object('status', 'used');
+  end if;
+  if v_row.expires_at < now() then
+    return jsonb_build_object('status', 'expired');
+  end if;
+  select display_name into v_name from public.profiles where id = v_row.user_id;
+  select coalesce(sum(points), 0)::int into v_balance from public.points_ledger where user_id = v_row.user_id;
+  return jsonb_build_object(
+    'status', 'ok',
+    'member', v_name,
+    'balance', v_balance,
+    'expires_at', v_row.expires_at,
+    'rewards', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'id', r.id, 'title', r.title, 'description', r.description, 'cost', r.cost, 'nightly_limit', r.nightly_limit,
+        'used_tonight', (select count(*) from public.redemptions x
+                         where x.user_id = v_row.user_id and x.reward_id = r.id and x.night = v_night and x.voided_at is null)
+      ) order by r.sort, r.cost)
+      from public.rewards r
+      where r.venue_id = p_venue and r.is_active
+    ), '[]'::jsonb)
+  );
+end;
+$$;
+
+revoke execute on function public.redeem_lookup(uuid, text) from public, anon;
+grant execute on function public.redeem_lookup(uuid, text) to authenticated;
+
+create or replace function public.redeem_confirm(p_venue uuid, p_code text, p_reward uuid)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  v_guard   text := public.redeem_guard(p_venue);
+  v_row     public.redeem_codes%rowtype;
+  v_reward  public.rewards%rowtype;
+  v_balance int;
+  v_used    int;
+  v_night   date := public.points_night();
+  v_red_id  uuid;
+  v_name    text;
+begin
+  if v_guard is not null then
+    return jsonb_build_object('status', v_guard);
+  end if;
+  select * into v_row from public.redeem_codes
+  where code = upper(regexp_replace(coalesce(p_code, ''), '[^A-Za-z0-9]', '', 'g'))
+  for update;
+  if not found then
+    return jsonb_build_object('status', 'unknown');
+  end if;
+  if v_row.used_at is not null then
+    return jsonb_build_object('status', 'used');
+  end if;
+  if v_row.expires_at < now() then
+    return jsonb_build_object('status', 'expired');
+  end if;
+  if exists (select 1 from auth.users where id = v_row.user_id and banned_until > now()) then
+    return jsonb_build_object('status', 'suspended');
+  end if;
+  select * into v_reward from public.rewards where id = p_reward and venue_id = p_venue and is_active;
+  if not found then
+    return jsonb_build_object('status', 'no_reward');
+  end if;
+
+  -- One redemption at a time per member, so two bars can't spend the same balance.
+  perform pg_advisory_xact_lock(hashtext('points:' || v_row.user_id::text));
+  select coalesce(sum(points), 0)::int into v_balance from public.points_ledger where user_id = v_row.user_id;
+  if v_balance < v_reward.cost then
+    return jsonb_build_object('status', 'insufficient', 'balance', v_balance, 'cost', v_reward.cost);
+  end if;
+  if v_reward.nightly_limit is not null then
+    select count(*) into v_used from public.redemptions
+    where user_id = v_row.user_id and reward_id = v_reward.id and night = v_night and voided_at is null;
+    if v_used >= v_reward.nightly_limit then
+      return jsonb_build_object('status', 'limit', 'nightly_limit', v_reward.nightly_limit);
+    end if;
+  end if;
+
+  insert into public.redemptions (user_id, venue_id, reward_id, title, points, night, staff_id)
+  values (v_row.user_id, p_venue, v_reward.id, v_reward.title, v_reward.cost, v_night, auth.uid())
+  returning id into v_red_id;
+  insert into public.points_ledger (user_id, points, reason, venue_id, redemption_id, note, created_by)
+  values (v_row.user_id, -v_reward.cost, 'redeem', p_venue, v_red_id, v_reward.title, auth.uid());
+  update public.redeem_codes set used_at = now() where code = v_row.code;
+
+  select display_name into v_name from public.profiles where id = v_row.user_id;
+  return jsonb_build_object(
+    'status', 'redeemed', 'redemption_id', v_red_id, 'member', v_name,
+    'title', v_reward.title, 'points', v_reward.cost, 'balance', v_balance - v_reward.cost
+  );
+end;
+$$;
+
+revoke execute on function public.redeem_confirm(uuid, text, uuid) from public, anon;
+grant execute on function public.redeem_confirm(uuid, text, uuid) to authenticated;
+
+-- Undo a redemption (refunds the points). Admins any time; the venue's staff
+-- within 12 hours, for mistakes at the bar.
+create or replace function public.void_redemption(p_redemption uuid)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  v_red public.redemptions%rowtype;
+begin
+  select * into v_red from public.redemptions where id = p_redemption for update;
+  if not found then
+    return jsonb_build_object('status', 'unknown');
+  end if;
+  if not (public.is_admin() or (public.is_venue_staff(v_red.venue_id) and v_red.created_at > now() - interval '12 hours')) then
+    return jsonb_build_object('status', 'forbidden');
+  end if;
+  if v_red.voided_at is not null then
+    return jsonb_build_object('status', 'already');
+  end if;
+  update public.redemptions set voided_at = now(), voided_by = auth.uid() where id = v_red.id;
+  delete from public.points_ledger where redemption_id = v_red.id;
+  return jsonb_build_object('status', 'voided', 'points', v_red.points);
+end;
+$$;
+
+revoke execute on function public.void_redemption(uuid) from public, anon;
+grant execute on function public.void_redemption(uuid) to authenticated;

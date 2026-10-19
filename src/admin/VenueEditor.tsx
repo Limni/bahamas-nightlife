@@ -14,6 +14,7 @@ import { PhotoManager } from './PhotoManager';
 import { MenuEditor } from './MenuEditor';
 import { useConsole } from './console';
 import { VenueManagersPanel } from './VenueManagers';
+import { RewardsPanel } from './RewardsPanel';
 import { FavoriteCount, useFavoriteCounts } from './favorites';
 
 interface Form {
@@ -407,6 +408,8 @@ export default function VenueEditor() {
           </Field>
         </div>
       </Panel>
+
+      {(isAdmin || isManager) && <RewardsPanel venueId={venue.id} venueName={venue.name} />}
 
       {isAdmin && <VenueManagersPanel venueId={venue.id} venueName={venue.name} />}
 

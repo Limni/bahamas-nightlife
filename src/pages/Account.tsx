@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, Coins, Gift, Heart, MapPinCheck, SlidersHorizontal, ChevronRight, Clock, KeyRound, Loader2, LogOut, MailCheck, MessageSquarePlus, PartyPopper, Pencil, Shield, Star, Store, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Coins, Gift, Heart, MapPinCheck, QrCode, ScanLine, SlidersHorizontal, ChevronRight, Clock, KeyRound, Loader2, LogOut, MailCheck, MessageSquarePlus, PartyPopper, Pencil, Shield, Star, Store, XCircle } from 'lucide-react';
 import { authLinkError, supabase, supabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
 import { SUBMISSION_KIND_LABELS, type SubmissionKind, type SubmissionStatus } from '@/lib/types';
@@ -12,6 +12,8 @@ import { useFavorites } from '@/lib/favorites';
 import { useDirectory } from '@/lib/directory';
 import { useNow } from '@/lib/useNow';
 import { pointsLabel, useMyPoints, usePointsConfig, type LedgerRow } from '@/lib/points';
+import { useAllRewards } from '@/lib/rewards';
+import { RedeemCodeSheet } from '@/components/RedeemCode';
 
 const input =
   'w-full px-4 py-3 rounded-2xl border border-white/10 bg-night-950/70 outline-none focus:border-brand-400 font-semibold text-white placeholder:text-night-500';
@@ -259,6 +261,8 @@ function SignedIn() {
   const [reviews, setReviews] = useState<MyReview[] | null>(null);
   const [subs, setSubs] = useState<MySubmission[] | null>(null);
   const [managed, setManaged] = useState<ManagedVenue[]>([]);
+  // Venues they're staff at (redeem points only), from the same assignments table.
+  const [staffAt, setStaffAt] = useState<ManagedVenue[]>([]);
   const [nameError, setNameError] = useState<string | null>(null);
 
   // Arrived via "sign in to review" → go straight back once signed in.
@@ -279,16 +283,19 @@ function SignedIn() {
     // Venues an admin has made this member a manager of (usually none).
     supabase
       .from('venue_managers')
-      .select('venues(id, name, slug, area, cover_url, is_published)')
+      .select('role, venues(id, name, slug, area, cover_url, is_published)')
       .eq('user_id', session.user.id)
-      .then(({ data }) =>
-        setManaged(
-          ((data ?? []) as unknown as { venues: ManagedVenue | null }[])
+      .then(({ data }) => {
+        const rows = (data ?? []) as unknown as { role?: string; venues: ManagedVenue | null }[];
+        const pick = (staff: boolean) =>
+          rows
+            .filter((r) => (r.role === 'staff') === staff)
             .map((r) => r.venues)
             .filter((v): v is ManagedVenue => !!v)
-            .sort((a, b) => a.name.localeCompare(b.name)),
-        ),
-      );
+            .sort((a, b) => a.name.localeCompare(b.name));
+        setManaged(pick(false));
+        setStaffAt(pick(true));
+      });
   }, [session]);
 
   const saveName = async () => {
@@ -376,6 +383,22 @@ function SignedIn() {
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {staffAt.length > 0 && (
+        <section className="bg-night-900 rounded-[1.75rem] border border-amber-400/30 p-5 md:p-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="flex items-center gap-2 font-display text-xl font-bold text-white">
+              <ScanLine className="w-5 h-5 text-amber-300" /> Venue staff
+            </h2>
+            <p className="mt-1 text-sm font-semibold text-night-300">
+              Redeem members’ points at {staffAt.map((v) => v.name).join(', ')} by scanning their code.
+            </p>
+          </div>
+          <Link to="/manage/redeem" className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-night-950 text-sm font-extrabold">
+            Open the scanner <ChevronRight className="w-4 h-4" />
+          </Link>
         </section>
       )}
 
@@ -532,7 +555,20 @@ const REASON: Record<LedgerRow['reason'], { label: string; icon: typeof Coins }>
 /** Balance, how to earn, and the latest entries. Hidden until the points schema exists and points are on. */
 function MyPointsSection({ userId }: { userId: string | undefined }) {
   const config = usePointsConfig();
-  const { summary, history, available } = useMyPoints(userId);
+  const { summary, history, available, reload } = useMyPoints(userId);
+  const rewards = useAllRewards(!!config?.enabled);
+  const [codeOpen, setCodeOpen] = useState(false);
+  // Group partner rewards by venue for "Where to use your points".
+  const partners = useMemo(() => {
+    const by = new Map<string, { name: string; slug: string; items: typeof rewards }>();
+    for (const r of rewards) {
+      if (!r.venues) continue;
+      const g = by.get(r.venue_id) ?? { name: r.venues.name, slug: r.venues.slug, items: [] };
+      g.items.push(r);
+      by.set(r.venue_id, g);
+    }
+    return [...by.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [rewards]);
 
   // /account#points (from a venue's "See your points") scrolls here once it renders.
   const shown = !!config?.enabled && available === true;
@@ -548,13 +584,48 @@ function MyPointsSection({ userId }: { userId: string | undefined }) {
           <h2 className="flex items-center gap-2 font-display text-xl font-bold text-white">
             <Coins className="w-5 h-5 text-amber-300" /> My points
           </h2>
-          <p className="mt-1 text-sm font-semibold text-night-300">Rewards at participating bars are coming soon.</p>
+          <p className="mt-1 text-sm font-semibold text-night-300">
+            {partners.length ? 'Spend them on rewards at participating bars.' : 'Rewards at participating bars are coming soon.'}
+          </p>
         </div>
         <p className="text-right">
           <span className="block font-display text-4xl font-extrabold text-amber-300 leading-none">{summary.balance}</span>
           <span className="text-xs font-extrabold uppercase tracking-wider text-night-300">points</span>
         </p>
       </div>
+
+      {partners.length > 0 && (
+        <>
+          <button
+            type="button"
+            onClick={() => setCodeOpen(true)}
+            className="mt-4 w-full inline-flex items-center justify-center gap-2 py-3 rounded-2xl bg-amber-400 hover:bg-amber-300 text-night-950 font-extrabold"
+          >
+            <QrCode className="w-5 h-5" /> Show my code
+          </button>
+          <div className="mt-4">
+            <h3 className="text-xs font-extrabold uppercase tracking-wider text-night-300">Where to use your points</h3>
+            <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {partners.map((p) => (
+                <li key={p.slug} className="p-3 rounded-2xl bg-white/5 border border-white/10 min-w-0">
+                  <Link to={`/v/${p.slug}`} className="block font-extrabold text-white truncate hover:text-brand-200">
+                    {p.name}
+                  </Link>
+                  <ul className="mt-1 space-y-0.5">
+                    {p.items.slice(0, 4).map((r) => (
+                      <li key={r.id} className="flex justify-between gap-2 text-sm font-semibold text-night-200">
+                        <span className="truncate">{r.title}</span>
+                        <span className={`shrink-0 font-extrabold ${summary.balance >= r.cost ? 'text-amber-300' : 'text-night-400'}`}>{r.cost}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <RedeemCodeSheet open={codeOpen} onClose={() => setCodeOpen(false)} onRedeemed={reload} />
+        </>
+      )}
 
       <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
         <div className="flex items-start gap-2.5 p-3 rounded-2xl bg-white/5 border border-white/10">

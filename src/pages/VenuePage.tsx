@@ -22,6 +22,7 @@ import { LikeSignInPrompt, MenuSections, useMenuLikes } from '@/components/MenuL
 import { PopularTimes } from '@/components/PopularTimes';
 import { EventCard } from '@/components/EventCard';
 import { CheckInCard } from '@/components/CheckIn';
+import { RewardsHere } from '@/components/Rewards';
 import { shareLink } from '@/lib/share';
 
 // 'menu' is the drinks menu (its URL, ?tab=menu, predates the food menu).
@@ -297,6 +298,7 @@ export default function VenuePage() {
         </div>
 
         {hasLocation(r) && r.is_published && <CheckInCard venue={r} className="mt-4" />}
+        {r.is_published && <RewardsHere venue={r} className="mt-4" />}
 
         {/* Tabs */}
         <div className="sticky top-0 md:top-16 z-[900] -mx-4 px-4 md:mx-0 md:px-0 mt-5 py-2 bg-night-950/90 backdrop-blur-md">

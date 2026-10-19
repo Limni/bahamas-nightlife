@@ -162,6 +162,8 @@ export function useMyPoints(userId: string | undefined) {
   const [summary, setSummary] = useState<MyPoints | null>(null);
   const [history, setHistory] = useState<LedgerRow[]>([]);
   const [available, setAvailable] = useState<boolean | undefined>(undefined);
+  const [tick, setTick] = useState(0);
+  const reload = useCallback(() => setTick((t) => t + 1), []);
   useEffect(() => {
     if (!userId || !supabaseConfigured) return;
     let alive = true;
@@ -184,6 +186,6 @@ export function useMyPoints(userId: string | undefined) {
     return () => {
       alive = false;
     };
-  }, [userId]);
-  return { summary, history, available };
+  }, [userId, tick]);
+  return { summary, history, available, reload };
 }

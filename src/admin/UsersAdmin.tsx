@@ -603,7 +603,7 @@ function MemberDetail({ m, me, onChanged }: { m: Member; me: boolean; onChanged:
       )}
 
       <div className="space-y-2">
-        <p className="text-xs font-extrabold uppercase tracking-wider text-slate-500">Venues they manage</p>
+        <p className="text-xs font-extrabold uppercase tracking-wider text-slate-500">Venues they manage or staff</p>
         {m.banned_until ? (
           <p className="text-sm font-semibold text-slate-500">Suspended members can’t manage venues until the suspension ends.</p>
         ) : null}

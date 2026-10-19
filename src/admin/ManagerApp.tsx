@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, Navigate, NavLink, Route, Routes, useParams } from 'react-router-dom';
-import { CalendarHeart, CalendarPlus, ExternalLink, Martini, Pencil, Store, UserRound, UtensilsCrossed } from 'lucide-react';
+import { Link, Navigate, NavLink, Route, Routes, useLocation, useParams } from 'react-router-dom';
+import { CalendarHeart, CalendarPlus, ExternalLink, Gift, Martini, Pencil, ScanLine, Store, UserRound, UtensilsCrossed } from 'lucide-react';
 import { supabase, supabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
 import { useDirectory } from '@/lib/directory';
@@ -14,28 +14,42 @@ import { FavoriteCount, useFavoriteCounts } from './favorites';
 import VenueEditor from './VenueEditor';
 import EventsList from './EventsList';
 import EventEditor from './EventEditor';
+import Redeem, { type RedeemVenue } from './Redeem';
 
 // "/manage": the venue manager section. A member an admin has assigned to one
 // or more venues edits them here with the same editors as the admin console,
 // scoped to their venues and without the admin-only controls. Lazy-loaded
 // like /admin, so none of this ships to ordinary visitors.
+//
+// Staff (bartenders at reward partners) only get Redeem: scan a member's code
+// and spend their points. Managers of a partner venue get it alongside their
+// editors. Admins can open /manage/redeem for any partner venue.
 
 const LIGHT = { colorScheme: 'light' } as const;
 
-const NAV = [
+const MANAGER_NAV = [
   { to: '/manage', label: 'My venues', icon: Store, end: true },
   { to: '/manage/events', label: 'Events', icon: CalendarHeart, end: false },
 ];
+const REDEEM_NAV = { to: '/manage/redeem', label: 'Redeem', icon: ScanLine, end: false };
 
 export default function ManagerApp() {
   const { session, loading } = useAuth();
+  const { pathname, search } = useLocation();
   const [venues, setVenues] = useState<Venue[] | null>(null);
+  const [redeemVenues, setRedeemVenues] = useState<RedeemVenue[]>([]);
   const userId = session?.user.id;
 
   const load = useCallback(async () => {
     if (!userId) return;
-    const { data } = await supabase.from('venue_managers').select('venues(*)').eq('user_id', userId);
-    const list = ((data ?? []) as unknown as { venues: Venue | null }[]).map((r) => r.venues).filter((v): v is Venue => !!v);
+    const [{ data }, redeem] = await Promise.all([
+      supabase.from('venue_managers').select('role, venues(*)').eq('user_id', userId),
+      supabase.rpc('my_redeem_venues'),
+    ]);
+    // Staff rows don't edit anything; only managers' venues open in the editors.
+    const rows = (data ?? []) as unknown as { role?: string; venues: Venue | null }[];
+    const list = rows.filter((r) => (r.role ?? 'manager') === 'manager').map((r) => r.venues).filter((v): v is Venue => !!v);
+    setRedeemVenues(redeem.error ? [] : ((redeem.data ?? []) as RedeemVenue[]));
     setVenues(list.sort((a, b) => a.name.localeCompare(b.name)));
   }, [userId]);
 
@@ -51,7 +65,8 @@ export default function ManagerApp() {
   );
 
   if (!supabaseConfigured) return <SetupNotice />;
-  if (!loading && !session) return <Navigate to="/account?next=/manage" replace />;
+  // Keep the path and ?code= (a member's QR scanned with the phone camera) through sign-in.
+  if (!loading && !session) return <Navigate to={`/account?next=${encodeURIComponent(pathname + search)}`} replace />;
   if (loading || venues === null) {
     return (
       <div style={LIGHT} className="min-h-dvh flex items-center justify-center bg-slate-100">
@@ -59,6 +74,11 @@ export default function ManagerApp() {
       </div>
     );
   }
+
+  const managing = venues.length > 0;
+  const redeeming = redeemVenues.length > 0;
+  const NAV = [...(managing ? MANAGER_NAV : []), ...(redeeming ? [REDEEM_NAV] : [])];
+  const phoneNav = [...NAV, { to: '/account', label: 'Account', icon: UserRound, end: true }];
 
   return (
     <FeedbackProvider>
@@ -71,7 +91,7 @@ export default function ManagerApp() {
                   <Martini className="w-4 h-4 text-white" />
                 </span>
                 <span className="font-display font-black truncate">
-                  Venue <span className="text-brand-400 font-bold">manager</span>
+                  Venue <span className="text-brand-400 font-bold">{managing ? 'manager' : 'staff'}</span>
                 </span>
               </Link>
               <nav className="hidden md:flex items-center gap-1">
@@ -100,22 +120,23 @@ export default function ManagerApp() {
           </header>
 
           <main className="max-w-5xl mx-auto px-3 md:px-4 py-4 md:py-6">
-            {venues.length === 0 ? (
+            {!managing && !redeeming ? (
               <NoVenues />
             ) : (
               <Routes>
-                <Route index element={<MyVenues venues={venues} reload={load} />} />
-                <Route path="v/:id" element={<OwnVenue ids={venueIds} />} />
-                <Route path="events" element={<EventsList />} />
-                <Route path="events/:id" element={<EventEditor />} />
+                <Route index element={managing ? <MyVenues venues={venues} reload={load} redeeming={redeeming} /> : <Navigate to="/manage/redeem" replace />} />
+                {managing && <Route path="v/:id" element={<OwnVenue ids={venueIds} />} />}
+                {managing && <Route path="events" element={<EventsList />} />}
+                {managing && <Route path="events/:id" element={<EventEditor />} />}
+                {redeeming && <Route path="redeem" element={<Redeem venues={redeemVenues} />} />}
                 <Route path="*" element={<Navigate to="/manage" replace />} />
               </Routes>
             )}
           </main>
 
           <nav className="md:hidden fixed bottom-0 inset-x-0 z-[1500] bg-white border-t border-slate-200 pb-[env(safe-area-inset-bottom)]">
-            <div className="h-[68px] grid grid-cols-3">
-              {[...NAV, { to: '/account', label: 'Account', icon: UserRound, end: true }].map(({ to, label, icon: Icon, end }) => (
+            <div className={`h-[68px] grid ${phoneNav.length === 4 ? 'grid-cols-4' : phoneNav.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+              {phoneNav.map(({ to, label, icon: Icon, end }) => (
                 <NavLink
                   key={to}
                   to={to}
@@ -163,7 +184,7 @@ function OwnVenue({ ids }: { ids: string[] }) {
   return <VenueEditor />;
 }
 
-function MyVenues({ venues, reload }: { venues: Venue[]; reload: () => void }) {
+function MyVenues({ venues, reload, redeeming }: { venues: Venue[]; reload: () => void; redeeming: boolean }) {
   const { ratings, events } = useDirectory();
   const { heatOf } = useActivity();
   const favorites = useFavoriteCounts();
@@ -224,6 +245,16 @@ function MyVenues({ venues, reload }: { venues: Venue[]; reload: () => void }) {
           );
         })}
       </ul>
+      {redeeming && (
+        <Link to="/manage/redeem" className="flex items-center gap-3 p-4 rounded-2xl bg-amber-50 border border-amber-200 hover:bg-amber-100">
+          <Gift className="w-6 h-6 text-amber-600 shrink-0" />
+          <span className="min-w-0 flex-1">
+            <span className="block font-extrabold text-slate-900">Redeem members’ points</span>
+            <span className="block text-sm font-semibold text-slate-600">Scan their code at the bar. Set your rewards under Edit details → Rewards.</span>
+          </span>
+          <ScanLine className="w-5 h-5 text-amber-700 shrink-0" />
+        </Link>
+      )}
       <p className="text-xs font-semibold text-slate-400">
         Reviews and likes come from visitors, so they can’t be changed here. To publish a draft, take a listing down or ask about featured placement,
         contact the Nassau Nights team.
