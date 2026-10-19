@@ -15,7 +15,7 @@ import { supabaseConfigured } from '@/lib/supabase';
 import { RailCard, VenueCard, VenueRow } from '@/components/VenueCard';
 import { EventCard } from '@/components/EventCard';
 import { FilterSheet, SearchFilterBar } from '@/components/FilterSheet';
-import { EmptyState, HeatBadge } from '@/components/ui';
+import { Chip, EmptyState, HeatBadge } from '@/components/ui';
 import { SetupNotice } from '@/components/SetupNotice';
 import { Logo } from '@/components/Layout';
 import { RadioButton } from '@/components/Radio';
@@ -44,15 +44,6 @@ const VIBE_ICONS: Record<string, LucideIcon> = {
   'Hidden Gem': Gem,
   'LGBTQ+ Friendly': Rainbow,
 };
-
-const VIBE_TONES = [
-  'from-brand-600 to-brand-900',
-  'from-glow-600 to-night-800',
-  'from-[#7c3aed] to-[#2e1065]',
-  'from-brand-500 to-glow-700',
-  'from-[#be123c] to-[#4c0519]',
-  'from-glow-700 to-brand-900',
-];
 
 /** Hour of day in Nassau, regardless of the visitor's timezone. */
 function nassauHour(now: number) {
@@ -173,6 +164,46 @@ function ScrollRow({ children, className, arrowTop }: { children: ReactNode; cla
 }
 
 /** Desktop hero art: a live "board" of where it's busy, else tonight's events, else the scene's mix. */
+/** A labelled, single-line, sideways-scrolling row of toggle chips (selected ones first). */
+function TagChips({
+  label,
+  icon: Icon,
+  items,
+  selected,
+  onToggle,
+  iconFor,
+}: {
+  label: string;
+  icon: LucideIcon;
+  items: [string, number][];
+  selected: string[];
+  onToggle: (value: string) => void;
+  iconFor?: (value: string) => LucideIcon | undefined;
+}) {
+  if (!items.length) return null;
+  const ordered = [...items.filter(([v]) => selected.includes(v)), ...items.filter(([v]) => !selected.includes(v))];
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <span className="shrink-0 inline-flex items-center gap-1 w-16 text-[11px] font-extrabold uppercase tracking-wider text-night-300">
+        <Icon className="w-3.5 h-3.5 text-brand-400" /> {label}
+      </span>
+      <div className="flex-1 min-w-0 flex gap-1.5 overflow-x-auto no-scrollbar py-0.5 [mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)] pr-6">
+        {ordered.map(([value, n]) => {
+          const on = selected.includes(value);
+          const VIcon = iconFor?.(value);
+          return (
+            <Chip key={value} size="sm" active={on} onClick={() => onToggle(value)}>
+              {VIcon && <VIcon className="w-3.5 h-3.5" />}
+              {value}
+              {n > 0 && <span className={`text-[10px] font-extrabold ${on ? 'text-white/80' : 'text-night-400'}`}>{n}</span>}
+            </Chip>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function LiveBoard({ venues, counts, now }: { venues: Venue[]; counts: [string, number][]; now: number }) {
   const { heatOf, activity } = useActivity();
   const { events } = useDirectory();
@@ -311,7 +342,7 @@ export default function Explore() {
   const withCounts = (labels: string[], counts: Map<string, number>) =>
     (venues.length ? labels.filter((l) => counts.get(l)) : labels).map((l) => [l, counts.get(l) ?? 0] as [string, number]);
   const categories = withCounts(tagsOf('category'), categoryCounts);
-  const vibes = withCounts(tagsOf('vibe'), vibeCounts).slice(0, 6);
+  const vibes = withCounts(tagsOf('vibe'), vibeCounts);
   const areas = withCounts(tagsOf('area'), areaCounts);
   const topCategories = [...categoryCounts.entries()].sort((a, b) => b[1] - a[1]);
 
@@ -601,32 +632,6 @@ export default function Explore() {
             </section>
           )}
 
-          {/* ---------------------------------------------- Vibe collections */}
-          {vibes.length > 0 && (
-            <section className="mt-10">
-              <SectionHeader eyebrow="Collections" title="Find your vibe" />
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-                {vibes.map(([label, n], i) => {
-                  const Icon = VIBE_ICONS[label] ?? Sparkles;
-                  return (
-                    <button
-                      key={label}
-                      onClick={() => apply({ vibes: [label] })}
-                      className={`group relative overflow-hidden text-left rounded-[1.5rem] p-4 md:p-5 min-h-28 md:min-h-36 bg-gradient-to-br ${VIBE_TONES[i % VIBE_TONES.length]} text-white ring-1 ring-white/10 hover:-translate-y-0.5 hover:ring-white/30 transition-all`}
-                    >
-                      <Icon className="absolute -right-3 -bottom-3 w-24 h-24 md:w-28 md:h-28 text-white/10 group-hover:scale-110 group-hover:-rotate-6 transition-transform duration-500" />
-                      <span className="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center">
-                        <Icon className="w-5 h-5" />
-                      </span>
-                      <span className="block font-display text-base md:text-lg font-bold mt-3 leading-tight">{label}</span>
-                      <span className="block text-xs font-bold text-white/70 mt-0.5">{n ? `${n} spot${n === 1 ? '' : 's'}` : 'Coming soon'}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          )}
-
           {/* -------------------------------------------------- Fresh additions */}
           {fresh.length >= 3 && (
             <section className="mt-10">
@@ -644,31 +649,18 @@ export default function Explore() {
             </section>
           )}
 
-          {/* ------------------------------------------------------------ Areas */}
-          {areas.length > 0 && (
-            <section className="mt-10">
-              <SectionHeader eyebrow="Around the island" title="Explore by neighbourhood" />
-              <div className="flex flex-wrap gap-2">
-                {areas.map(([label, n]) => (
-                  <button
-                    key={label}
-                    onClick={() => apply({ areas: [label] })}
-                    className="inline-flex items-center gap-2 pl-3 pr-2 py-2 rounded-full bg-night-900 border border-white/10 text-sm font-bold text-night-50 hover:border-brand-400/60 hover:bg-night-800 transition-colors"
-                  >
-                    <MapPin className="w-4 h-4 text-brand-400" />
-                    {label}
-                    {n > 0 && <span className="px-2 py-0.5 rounded-full bg-brand-500/15 text-brand-200 text-xs font-extrabold">{n}</span>}
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
         </>
       )}
 
       {/* ---------------------------------------------------------- All spots */}
       <section ref={resultsRef} className="mt-10 scroll-mt-4 md:scroll-mt-20">
         <SectionHeader eyebrow={browsing ? 'The full directory' : 'Your search'} title={browsing ? 'All spots' : 'Matching spots'} />
+
+        {/* Vibes and neighbourhoods as toggles (like the map): one scrolling line each, combinable with every other filter. */}
+        <div className="space-y-2 mb-3">
+          <TagChips label="Vibe" icon={Sparkles} items={vibes} selected={filters.vibes} onToggle={(v) => toggle('vibes', v)} iconFor={(v) => VIBE_ICONS[v]} />
+          <TagChips label="Area" icon={MapPin} items={areas} selected={filters.areas} onToggle={(a) => toggle('areas', a)} />
+        </div>
 
         <div className="sticky top-0 md:top-16 z-[1000] -mx-4 px-4 md:-mx-6 md:px-6 py-2.5 bg-night-950/90 backdrop-blur-md border-b border-white/10 mb-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
