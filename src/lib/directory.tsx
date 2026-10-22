@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { supabase, supabaseConfigured } from './supabase';
 import type { NightEvent, RatingSummary, Venue, Tag, TagKind } from './types';
 
@@ -141,12 +141,20 @@ export function useDirectory() {
 // User location. Off until something asks for it (the map, or "Near me"), or
 // the visitor already granted permission on a previous visit. Once on, a
 // single watcher serves every page.
+//
+// Phones pause the watcher while the screen is off or the browser is in the
+// background, and iOS Safari often doesn't resume it, so the last fix (the
+// previous bar) would stick until the browser was force-closed. So: every fix
+// carries the time it arrived, the watcher is restarted when the page comes
+// back, and `refresh()` asks for a fresh fix on demand.
 // ---------------------------------------------------------------------------
 
 export interface UserLocation {
   lat: number;
   lng: number;
   accuracy: number;
+  /** When this fix arrived (ms). A phone standing still may get no new ones. */
+  at: number;
 }
 
 interface LocationValue {
@@ -154,14 +162,22 @@ interface LocationValue {
   error: string | null;
   enabled: boolean;
   enable: () => void;
+  /** One fresh fix (≤ 20 s old), or null if none comes. Also updates `location`. */
+  refresh: () => Promise<UserLocation | null>;
 }
 
 const LocationContext = createContext<LocationValue | null>(null);
+
+// Coming back after this long without a fix restarts the watcher.
+const RESTART_AFTER_MS = 30_000;
 
 export function LocationProvider({ children }: { children: ReactNode }) {
   const [enabled, setEnabled] = useState(false);
   const [location, setLocation] = useState<UserLocation | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Bumped to tear down and re-create the watcher.
+  const [watchKey, setWatchKey] = useState(0);
+  const latest = useRef<UserLocation | null>(null);
 
   // Auto-enable for returning visitors who already allowed location.
   useEffect(() => {
@@ -173,6 +189,14 @@ export function LocationProvider({ children }: { children: ReactNode }) {
       .catch(() => {});
   }, []);
 
+  const onFix = useCallback((pos: GeolocationPosition) => {
+    const fix = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy, at: Date.now() };
+    latest.current = fix;
+    setLocation(fix);
+    setError(null);
+    return fix;
+  }, []);
+
   useEffect(() => {
     if (!enabled) return;
     if (!navigator.geolocation) {
@@ -180,10 +204,7 @@ export function LocationProvider({ children }: { children: ReactNode }) {
       return;
     }
     const id = navigator.geolocation.watchPosition(
-      (pos) => {
-        setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy });
-        setError(null);
-      },
+      onFix,
       (err) =>
         setError(
           err.code === err.PERMISSION_DENIED
@@ -193,10 +214,43 @@ export function LocationProvider({ children }: { children: ReactNode }) {
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 },
     );
     return () => navigator.geolocation.clearWatch(id);
+  }, [enabled, watchKey, onFix]);
+
+  // Back from the lock screen / another app / the bfcache: restart a watcher
+  // that has gone quiet.
+  useEffect(() => {
+    if (!enabled) return;
+    const wake = () => {
+      if (document.visibilityState !== 'visible') return;
+      const last = latest.current;
+      if (!last || Date.now() - last.at > RESTART_AFTER_MS) setWatchKey((k) => k + 1);
+    };
+    document.addEventListener('visibilitychange', wake);
+    window.addEventListener('pageshow', wake);
+    return () => {
+      document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('pageshow', wake);
+    };
   }, [enabled]);
 
+  const pending = useRef<Promise<UserLocation | null> | null>(null);
+  const refresh = useCallback(() => {
+    if (!navigator.geolocation) return Promise.resolve(null);
+    // Callers share one request rather than stacking GPS lookups.
+    pending.current ??= new Promise<UserLocation | null>((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve(onFix(pos)),
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 20000 },
+      );
+    }).finally(() => {
+      pending.current = null;
+    });
+    return pending.current;
+  }, [onFix]);
+
   const enable = useCallback(() => setEnabled(true), []);
-  const value = useMemo(() => ({ location, error, enabled, enable }), [location, error, enabled, enable]);
+  const value = useMemo(() => ({ location, error, enabled, enable, refresh }), [location, error, enabled, enable, refresh]);
   return <LocationContext.Provider value={value}>{children}</LocationContext.Provider>;
 }
 

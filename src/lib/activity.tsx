@@ -26,6 +26,12 @@ const CACHE_KEY = 'activity:v1';
 const PING_EVERY_MS = 120_000;
 const PING_MIN_GAP_MS = 50_000; // the server ignores pings under 45 s apart
 const MOVED_M = 75; // a move this big pings early (walking to the next bar)
+// A fix older than this is refreshed before it's reported: after the phone
+// slept, the last one is usually the previous bar.
+const FIX_MAX_AGE_MS = 60_000;
+// No fresh fix for this long → stop saying "You're at X" (the server drops the
+// visit after 15 minutes without pings anyway).
+const HERE_TTL_MS = 5 * 60_000;
 const REFRESH_MS = 60_000;
 const CACHE_MAX_AGE_MS = 10 * 60_000; // older live data is misleading, not helpful
 
@@ -174,7 +180,7 @@ interface ActivityValue {
 const ActivityContext = createContext<ActivityValue | null>(null);
 
 export function ActivityProvider({ children }: { children: ReactNode }) {
-  const { location, enable } = useUserLocation();
+  const { location, enable, refresh: refreshFix } = useUserLocation();
   const [activity, setActivity] = useState<Record<string, VenueActivity>>(readCache);
   const [loaded, setLoaded] = useState(() => Object.keys(readCache()).length > 0);
   const [consent, setConsentState] = useState<Consent>(readConsent);
@@ -239,25 +245,45 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
   const lastSent = useRef<{ at: number; lat: number; lng: number } | null>(null);
   const hereRef = useRef<string | null>(null);
 
+  const lastOk = useRef(0);
+  const sending = useRef(false);
+  const maybeSendRef = useRef<(() => void) | null>(null);
+
   const report = useCallback(async () => {
-    const loc = latest.current;
-    if (!loc || !onIsland(loc.lat, loc.lng)) return;
-    lastSent.current = { at: Date.now(), lat: loc.lat, lng: loc.lng };
-    const { data, error } = await supabase.rpc('report_presence', {
-      p_device: deviceId(),
-      p_lat: loc.lat,
-      p_lng: loc.lng,
-      p_accuracy: Number.isFinite(loc.accuracy) ? Math.round(loc.accuracy) : null,
-    });
-    if (error) return;
-    const next = (data as string | null) ?? null;
-    if (next !== hereRef.current) {
-      // Our own arrival/departure changes a count: show it without waiting.
-      hereRef.current = next;
-      setHere(next);
-      refresh();
+    if (sending.current) return;
+    sending.current = true;
+    try {
+      let loc = latest.current;
+      if (loc && Date.now() - loc.at > FIX_MAX_AGE_MS) loc = await refreshFix();
+      if (!loc) {
+        // Can't tell where the phone is now: don't keep showing the old spot.
+        if (hereRef.current && Date.now() - lastOk.current > HERE_TTL_MS) {
+          hereRef.current = null;
+          setHere(null);
+        }
+        return;
+      }
+      if (!onIsland(loc.lat, loc.lng)) return;
+      lastSent.current = { at: Date.now(), lat: loc.lat, lng: loc.lng };
+      const { data, error } = await supabase.rpc('report_presence', {
+        p_device: deviceId(),
+        p_lat: loc.lat,
+        p_lng: loc.lng,
+        p_accuracy: Number.isFinite(loc.accuracy) ? Math.round(loc.accuracy) : null,
+      });
+      if (error) return;
+      lastOk.current = Date.now();
+      const next = (data as string | null) ?? null;
+      if (next !== hereRef.current) {
+        // Our own arrival/departure changes a count: show it without waiting.
+        hereRef.current = next;
+        setHere(next);
+        refresh();
+      }
+    } finally {
+      sending.current = false;
     }
-  }, [refresh]);
+  }, [refresh, refreshFix]);
 
   const sharing = consent === 'on' && supabaseConfigured;
 
@@ -280,15 +306,21 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
       const moved = last ? getDistance(last.lat, last.lng, loc.lat, loc.lng) : Infinity;
       if (since >= PING_EVERY_MS || (since >= PING_MIN_GAP_MS && moved >= MOVED_M)) report();
     };
+    maybeSendRef.current = maybeSend;
     maybeSend();
     const id = window.setInterval(maybeSend, 20_000);
     document.addEventListener('visibilitychange', maybeSend);
     return () => {
+      maybeSendRef.current = null;
       window.clearInterval(id);
       document.removeEventListener('visibilitychange', maybeSend);
     };
-    // A fresh fix re-runs this so the first ping goes out as soon as there is one.
-  }, [sharing, report, location !== null]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sharing, report]);
+
+  // Every new fix is a chance to ping early (first fix, or walked ≥ 75 m).
+  useEffect(() => {
+    maybeSendRef.current?.();
+  }, [location]);
 
   const setConsent = useCallback((c: Exclude<Consent, null>) => {
     setConsentState(c);
