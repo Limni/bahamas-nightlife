@@ -1892,6 +1892,18 @@ grant execute on function public.admin_set_editor(uuid, boolean) to authenticate
 alter table public.site_settings add column if not exists radio_enabled boolean not null default false;
 alter table public.site_settings add column if not exists radio_partner text check (radio_partner is null or char_length(radio_partner) <= 80);
 alter table public.site_settings add column if not exists radio_partner_url text check (radio_partner_url is null or radio_partner_url ~ '^https?://');
+-- Countries the player is offered in (ISO 3166-1 alpha-2, as Cloudflare's
+-- visitor location reports them); empty = everywhere. The partner's streams
+-- are licensed for the Bahamas, so that's the default. The site reads the
+-- visitor's country from Cloudflare (/cdn-cgi/trace) and hides the player
+-- elsewhere; see lib/radio.tsx for what that does and doesn't stop.
+alter table public.site_settings add column if not exists radio_countries text[] not null default '{BS}';
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'site_settings_radio_countries_check') then
+    alter table public.site_settings add constraint site_settings_radio_countries_check
+      check (cardinality(radio_countries) <= 250 and array_to_string(radio_countries, ',') ~ '^([A-Z]{2}(,[A-Z]{2})*)?$');
+  end if;
+end $$;
 
 create table if not exists public.radio_stations (
   id          uuid primary key default gen_random_uuid(),

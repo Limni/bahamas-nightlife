@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useAuth } from './auth';
 import { supabase, supabaseConfigured } from './supabase';
 
 // ---------------------------------------------------------------------------
@@ -9,6 +10,12 @@ import { supabase, supabaseConfigured } from './supabase';
 //
 // The provider sits around the public <Layout/>, so playback survives route
 // changes. The admin turns the player on in /admin/radio (site_settings).
+//
+// The streams are licensed for some countries only (site_settings
+// radio_countries, Bahamas by default), so the player is hidden for visitors
+// elsewhere. Their country comes from Cloudflare. This keeps the player off
+// foreign screens; it can't stop a VPN, or someone fetching the public stream
+// URLs directly. Only the broadcaster's stream host can enforce that.
 // ---------------------------------------------------------------------------
 
 export interface RadioStation {
@@ -35,14 +42,52 @@ interface Config {
   enabled: boolean;
   partner: string | null;
   partnerUrl: string | null;
+  /** ISO 3166-1 alpha-2 codes the player is offered in; empty = everywhere. */
+  countries: string[];
   stations: RadioStation[];
 }
 
-const CACHE_KEY = 'radio:v1';
+// v2: v1 caches have no country list, and must not show the player everywhere.
+const CACHE_KEY = 'radio:v2';
 const LAST_KEY = 'radio:last';
 const VOLUME_KEY = 'radio:volume';
 const PREVIEW_KEY = 'radio:preview';
-const OFF: Config = { enabled: false, partner: null, partnerUrl: null, stations: [] };
+const COUNTRY_KEY = 'radio:country';
+const OFF: Config = { enabled: false, partner: null, partnerUrl: null, countries: [], stations: [] };
+
+/**
+ * The visitor's country (ISO 3166-1 alpha-2) from Cloudflare, which answers
+ * /cdn-cgi/trace itself on every proxied host ("loc=BS"; "XX" when it can't
+ * tell, "T1" for Tor). null when unknown: localhost, a host not behind
+ * Cloudflare, offline. Remembered for the tab's session.
+ */
+export async function visitorCountry(): Promise<string | null> {
+  try {
+    const cached = sessionStorage.getItem(COUNTRY_KEY);
+    if (cached) return cached;
+  } catch {
+    /* private mode */
+  }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const res = await fetch('/cdn-cgi/trace', { cache: 'no-store', signal: ctrl.signal });
+    if (!res.ok) return null;
+    const loc = /^loc=([A-Z0-9]{2})$/m.exec(await res.text())?.[1] ?? null;
+    if (loc) {
+      try {
+        sessionStorage.setItem(COUNTRY_KEY, loc);
+      } catch {
+        /* private mode */
+      }
+    }
+    return loc;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function readPreview() {
   try {
@@ -251,6 +296,8 @@ interface RadioState {
   available: boolean;
   /** This tab is previewing the player ("/?radio=preview"). */
   preview: boolean;
+  /** Visitors in this tab's country don't get the player (an admin's preview still shows it). */
+  blockedHere: boolean;
   endPreview: () => void;
   partner: string | null;
   partnerUrl: string | null;
@@ -307,7 +354,10 @@ export function RadioProvider({ children }: { children: ReactNode }) {
     let alive = true;
     const load = async () => {
       // Missing columns/table (schema not re-run) = an error = no radio.
-      const { data, error } = await supabase.from('site_settings').select('radio_enabled, radio_partner, radio_partner_url').maybeSingle();
+      const { data, error } = await supabase
+        .from('site_settings')
+        .select('radio_enabled, radio_partner, radio_partner_url, radio_countries')
+        .maybeSingle();
       if (!alive) return;
       let next = OFF;
       if (!error && data && (data.radio_enabled || preview)) {
@@ -315,7 +365,13 @@ export function RadioProvider({ children }: { children: ReactNode }) {
         if (!alive) return;
         // RLS already hides incomplete stations from visitors; admins see them all.
         const stations = ((st.data ?? []) as RadioStation[]).filter((s) => s.is_enabled && (preview || s.stream_url));
-        next = { enabled: true, partner: data.radio_partner ?? null, partnerUrl: data.radio_partner_url ?? null, stations };
+        next = {
+          enabled: true,
+          partner: data.radio_partner ?? null,
+          partnerUrl: data.radio_partner_url ?? null,
+          countries: (data.radio_countries as string[] | null) ?? [],
+          stations,
+        };
       }
       setConfig(next);
       // A preview never becomes what this browser shows normally.
@@ -342,7 +398,26 @@ export function RadioProvider({ children }: { children: ReactNode }) {
     setPreview(false);
   }, []);
 
-  const available = config.enabled && config.stations.length > 0;
+  // ---- where it may play ---------------------------------------------------
+  // The country is looked up only once the player is on and limited. Until it
+  // answers, and whenever it can't tell, the player stays hidden: the limit is
+  // a licence condition, so unknown counts as outside. An admin previewing the
+  // player (?radio=preview) sees it from anywhere.
+  const { isAdmin } = useAuth();
+  const limited = config.countries.length > 0;
+  const [country, setCountry] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!config.enabled || !limited || country !== undefined) return;
+    let alive = true;
+    visitorCountry().then((c) => alive && setCountry(c));
+    return () => {
+      alive = false;
+    };
+  }, [config.enabled, limited, country]);
+  const blockedHere = limited && country !== undefined && !(country && config.countries.includes(country));
+  const inRegion = !limited || (!!country && config.countries.includes(country)) || (preview && isAdmin);
+
+  const available = config.enabled && config.stations.length > 0 && inRegion;
 
   // ---- playback ------------------------------------------------------------
   const teardown = useCallback(() => {
@@ -549,6 +624,7 @@ export function RadioProvider({ children }: { children: ReactNode }) {
     () => ({
       available,
       preview,
+      blockedHere,
       endPreview,
       partner: config.partner,
       partnerUrl: config.partnerUrl,
@@ -568,7 +644,7 @@ export function RadioProvider({ children }: { children: ReactNode }) {
       volume,
       setVolume,
     }),
-    [available, preview, endPreview, config, current, status, lastId, nowPlaying, pickerOpen, toggle, start, stop, resume, skip, close, volume, setVolume],
+    [available, preview, blockedHere, endPreview, config, current, status, lastId, nowPlaying, pickerOpen, toggle, start, stop, resume, skip, close, volume, setVolume],
   );
 
   return <RadioContext.Provider value={value}>{children}</RadioContext.Provider>;

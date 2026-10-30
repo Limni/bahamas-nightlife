@@ -193,12 +193,13 @@ export function RadioSheet() {
 
 /** Shown while this tab previews the player (admins checking the look before streams exist). */
 export function RadioPreviewPill() {
-  const { preview, endPreview, close } = useRadio();
+  const { preview, blockedHere, endPreview, close } = useRadio();
   if (!preview) return null;
   return (
     <div className="fixed z-[1600] top-3 md:top-[76px] left-1/2 -translate-x-1/2 flex items-center gap-2 pl-3.5 pr-1.5 py-1.5 rounded-full bg-night-800 text-white ring-1 ring-white/10 text-xs font-extrabold shadow-xl whitespace-nowrap">
       <RadioIcon className="w-4 h-4 text-glow-300" />
-      Previewing the radio player
+      {/* Outside the allowed countries an admin still sees the preview; visitors here don't. */}
+      {blockedHere ? 'Previewing radio · hidden in your country' : 'Previewing the radio player'}
       <button
         onClick={() => {
           close();

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Eye, ImagePlus, Play, Plus, Radio as RadioIcon, Square, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Eye, Globe2, ImagePlus, Play, Plus, Radio as RadioIcon, Square, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { compressImage, deleteMedia, uploadBlob } from '@/lib/images';
-import { attachStream, fetchNowPlaying, type RadioStation } from '@/lib/radio';
+import { attachStream, fetchNowPlaying, visitorCountry, type RadioStation } from '@/lib/radio';
 import { StationLogo } from '@/components/Radio';
 import { Spinner } from '@/components/ui';
 import { Button, Field, inputClass, Panel, Toggle, useFeedback } from './ui';
+import { CountryPicker, countryFlag, countryName } from './CountryPicker';
 
 // ---------------------------------------------------------------------------
 // /admin/radio: the partner broadcaster's stations and the master switch.
@@ -347,6 +348,67 @@ function statusOf(s: RadioStation) {
   return { label: 'Ready', cls: 'bg-emerald-50 text-emerald-700' };
 }
 
+/** "Where it plays": the countries the player is offered in (site_settings.radio_countries). */
+function CountriesSetting({ value, onSave }: { value: string[]; onSave: (next: string[]) => Promise<boolean> }) {
+  const { confirm } = useFeedback();
+  const [saving, setSaving] = useState(false);
+  // undefined = still asking Cloudflare; null = it couldn't tell (e.g. localhost)
+  const [here, setHere] = useState<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    let alive = true;
+    visitorCountry().then((c) => alive && setHere(c));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const save = async (next: string[]) => {
+    if (next.length === 0) {
+      const ok = await confirm({
+        title: 'Play the radio everywhere?',
+        body: 'With no countries listed, visitors anywhere in the world get the player. Only do this if the stations’ licence allows it.',
+        confirmLabel: 'Play everywhere',
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    setSaving(true);
+    await onSave(next);
+    setSaving(false);
+  };
+
+  const bahamasOnly = value.length === 1 && value[0] === 'BS';
+  const hearsIt = value.length === 0 || (!!here && value.includes(here));
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-xs font-extrabold uppercase tracking-wider text-slate-500">Where it plays</span>
+        {!bahamasOnly && (
+          <button type="button" disabled={saving} onClick={() => save(['BS'])} className="text-xs font-extrabold text-brand-700 hover:underline disabled:opacity-50">
+            Bahamas only
+          </button>
+        )}
+      </div>
+      <CountryPicker value={value} onChange={save} disabled={saving} />
+      <p className="text-xs font-semibold text-slate-500">
+        {value.length === 0
+          ? 'Everywhere: no country limit. Add a country to offer the player only there.'
+          : 'Visitors elsewhere don’t see the player. Their country comes from Cloudflare; a VPN gets around it, so the station’s own stream host must enforce a hard licence limit. Saves straight away.'}
+      </p>
+      <p className="flex items-start gap-1.5 text-xs font-semibold text-slate-500">
+        <Globe2 className="w-4 h-4 shrink-0" />
+        {here === undefined
+          ? 'Checking where you are…'
+          : here === null
+            ? 'Couldn’t tell where you are (this works on the live site). Visitors whose country is unknown don’t see the player.'
+            : `You’re browsing from ${countryFlag(here)} ${countryName(here)}: visitors there ${hearsIt ? 'see' : 'don’t see'} the player. Preview on the site shows it to you anyway.`}
+      </p>
+    </div>
+  );
+}
+
 export default function RadioAdmin() {
   const { toast } = useFeedback();
   const test = useTestPlayer();
@@ -355,6 +417,7 @@ export default function RadioAdmin() {
   const [enabled, setEnabled] = useState(false);
   const [partner, setPartner] = useState('');
   const [partnerUrl, setPartnerUrl] = useState('');
+  const [countries, setCountries] = useState<string[]>([]);
   const [savingSettings, setSavingSettings] = useState(false);
   const [stations, setStations] = useState<RadioStation[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -362,7 +425,7 @@ export default function RadioAdmin() {
 
   useEffect(() => {
     Promise.all([
-      supabase.from('site_settings').select('radio_enabled, radio_partner, radio_partner_url').maybeSingle(),
+      supabase.from('site_settings').select('radio_enabled, radio_partner, radio_partner_url, radio_countries').maybeSingle(),
       supabase.from('radio_stations').select('*').order('sort').order('name'),
     ]).then(([s, st]) => {
       setLoading(false);
@@ -373,6 +436,7 @@ export default function RadioAdmin() {
       setEnabled(!!s.data?.radio_enabled);
       setPartner(s.data?.radio_partner ?? '');
       setPartnerUrl(s.data?.radio_partner_url ?? '');
+      setCountries((s.data?.radio_countries as string[] | null) ?? []);
       setStations((st.data ?? []) as RadioStation[]);
     });
   }, []);
@@ -393,6 +457,21 @@ export default function RadioAdmin() {
     if (!data?.length) return toast('Nothing was saved. Re-run supabase/schema.sql to create the settings row.', 'error');
     setEnabled(nextEnabled);
     toast(nextEnabled ? (ready ? 'The radio is live on the site' : 'Saved. The player appears once a station has a stream URL') : 'Saved');
+  };
+
+  const saveCountries = async (next: string[]) => {
+    const { data, error } = await supabase.from('site_settings').update({ radio_countries: next }).eq('id', true).select('radio_countries');
+    if (error) {
+      toast(isSchemaError(error) ? MISSING_SCHEMA : error.message, 'error');
+      return false;
+    }
+    if (!data?.length) {
+      toast('Nothing was saved. Re-run supabase/schema.sql to create the settings row.', 'error');
+      return false;
+    }
+    setCountries((data[0].radio_countries as string[] | null) ?? next);
+    toast(next.length ? `Radio offered in ${next.length === 1 ? countryName(next[0]) : `${next.length} countries`}` : 'Radio offered everywhere');
+    return true;
   };
 
   const move = async (i: number, dir: -1 | 1) => {
@@ -446,6 +525,7 @@ export default function RadioAdmin() {
                     : 'No station has a stream URL yet, so visitors won’t see it even when on.'
                 }
               />
+              <CountriesSetting value={countries} onSave={saveCountries} />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label="Presented by" hint="The partner’s name, shown in the player.">
                   <input className={inputClass} value={partner} maxLength={80} onChange={(e) => setPartner(e.target.value)} placeholder="Broadcaster name" />
